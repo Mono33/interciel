@@ -3,7 +3,8 @@ pc_url: ""                      # ex. ws://<ADRESSE_LAN_DU_PC>:8791/satellite
 satellite_id: ""                # doit exister côté PC (config.yaml -> satellites[].id)
 token: ""                      # le meme token que cote PC pour ce satellite
 # Peripheriques audio (indices : `python -c "import sounddevice as sd; print(sd.query_devices())"`)
-micro: null                    # null = micro par defaut ; sinon l'index
+micro: null                    # null = micro par defaut ; un index ; ou un nom / une liste de noms
+                               # par ordre de preference, ex. ["USB Audio", "Mic"]
 haut_parleur: null             # null = sortie par defaut ; sinon l'index
 # Sortie ALSA partagee (facultatif, utile avec Spotify Connect/Raspotify)
 pcm_sortie_alsa: ""            # ex. jarvis_audio ; vide = sortie PortAudio ci-dessus

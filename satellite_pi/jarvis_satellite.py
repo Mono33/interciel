@@ -62,6 +62,82 @@ def _etat_affiche(etat, micro):
     return etat
 
 
+def _silence_numerique(index, secondes=0.4):
+    """Vrai si le micro ne renvoie que des zeros exacts (micro virtuel dont l'appli
+    est fermee, micro coupe) ou s'il ne s'ouvre pas. Une vraie capsule n'est
+    jamais a zero, meme dans une piece calme."""
+    try:
+        taux = int(round(sd.query_devices(index)["default_samplerate"] or TAUX))
+        with sd.InputStream(samplerate=taux, channels=1, dtype="float32",
+                            device=index) as flux:
+            audio, _ = flux.read(int(taux * secondes))
+        return float(np.max(np.abs(audio))) == 0.0
+    except Exception:
+        return True
+
+
+def _resoudre_micro(choix):
+    """Index PortAudio du micro a ouvrir.
+
+    choix : None (micro par defaut du systeme), un index, un nom ou morceau de nom
+    (« MOTIV Mix »), ou une liste de noms par ordre de preference. Les noms sont
+    cherches dans l'API audio par defaut seulement (MME sous Windows) : Windows
+    liste le meme micro sous plusieurs API, un nom seul y serait ambigu. Avec
+    plusieurs candidats, un micro muet (zeros exacts) est saute au profit du
+    suivant. Aucun nom trouve : micro par defaut, avec un avertissement.
+    """
+    if choix is None or isinstance(choix, bool):
+        return None
+    if isinstance(choix, int):
+        return choix
+    noms = [choix] if isinstance(choix, str) else [str(n) for n in choix]
+    try:
+        appareils = sd.query_devices()
+        api = sd.default.hostapi
+    except Exception:
+        return None
+    trouves = []
+    for nom in noms:
+        cle = nom.strip().lower()
+        for index, appareil in enumerate(appareils):
+            if (cle and index not in trouves and appareil["max_input_channels"] > 0
+                    and appareil["hostapi"] == api and cle in appareil["name"].lower()):
+                trouves.append(index)
+                break
+    for rang, index in enumerate(trouves):
+        if rang == len(trouves) - 1 or not _silence_numerique(index):
+            return index
+        print(f"  [audio] « {appareils[index]['name']} » ne renvoie que du silence : "
+              "micro suivant")
+    print(f"  [audio] aucun micro ne correspond à {noms} : micro par défaut du système")
+    return None
+
+
+def sorties_utf8():
+    """Console ou journal en UTF-8. Redirigee vers un fichier sous Windows, la
+    sortie est en cp1252 : un emoji dans une reponse faisait planter le print,
+    donc couper la session au milieu de la reponse."""
+    for flux in (sys.stdout, sys.stderr):
+        try:
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+def _reinitialiser_portaudio():
+    """PortAudio fige la liste des peripheriques a son demarrage : sans cela, un
+    micro debranche puis rebranche (USB, Bluetooth) reste introuvable."""
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception as exc:
+        print("  [audio] reinitialisation impossible :", exc)
+
+
+class _MicroMuet(Exception):
+    """Le micro ouvert ne renvoie plus que du silence numerique."""
+
+
 class Micro:
     """Capture micro + wake word (openWakeWord) + capture d'énoncé (VAD simple).
     Tourne dans un thread ; pousse chaque énoncé complet (PCM int16 bytes) dans une
@@ -83,7 +159,7 @@ class Micro:
         self.blocs_purge_bip = max(0, int(conf.get("blocs_purge_bip", 2)))
         self.attente_arbitrage_reveil = float(
             conf.get("attente_arbitrage_reveil", 4.0))
-        self.device = conf.get("micro", None)
+        self.choix_micro = conf.get("micro", None)
         self.sortie = conf.get("haut_parleur", None)
         self._relance_jusqua = 0.0
         self._relance_lock = threading.Lock()
@@ -92,10 +168,18 @@ class Micro:
         self._reveil_id = 0
         self._reveil_accepte = False
         self._reveil_accuse_vocal = False
+        self._configurer_micro()
+
+    def _configurer_micro(self):
+        """Choisit le micro (par nom si demande) et lit sa frequence native.
+        Rappele a chaque reouverture : les index changent apres un debranchement."""
+        self.device = _resoudre_micro(self.choix_micro)
         try:
             info = sd.query_devices(self.device, "input")
+            self.nom_micro = str(info.get("name", "?"))
             self.taux_capture = int(round(info.get("default_samplerate") or TAUX))
         except Exception:
+            self.nom_micro = "?"
             self.taux_capture = TAUX
         self.bloc_capture = int(round(BLOC * self.taux_capture / TAUX))
 
@@ -120,7 +204,10 @@ class Micro:
 
     def _lire_bloc(self, flux):
         bloc, _ = flux.read(self.bloc_capture)
-        return self._vers_16k(bloc.flatten())
+        bloc = bloc.flatten()
+        # Silence numerique juge sur le son brut, avant tout reechantillonnage.
+        self.dernier_bloc_muet = not np.any(bloc)
+        return self._vers_16k(bloc)
 
     def ouvrir_relance(self, secondes=None):
         """Autorise une phrase de suivi sans nouveau mot d'activation."""
@@ -211,8 +298,11 @@ class Micro:
         except Exception as exc:
             print("  [audio] bip impossible:", exc)
 
-    def run(self):
-        reveil = self._reveil()
+    # Silence numerique tolere avant de passer au micro suivant de la liste.
+    SECONDES_MUET_MAX = 15.0
+
+    def _ouvrir_flux(self):
+        self._configurer_micro()
         flux = sd.InputStream(
             samplerate=self.taux_capture,
             channels=1,
@@ -221,71 +311,127 @@ class Micro:
             blocksize=self.bloc_capture,
         )
         flux.start()
-        if self.taux_capture != TAUX:
-            print(
-                f"  [audio] micro {self.taux_capture} Hz -> 16000 Hz "
-                f"({self.bloc_capture} -> {BLOC} échantillons)"
-            )
+        print(f"  [audio] micro : {self.nom_micro} "
+              f"({self.taux_capture} Hz -> 16000 Hz)")
+        return flux
+
+    def run(self):
+        """Superviseur du micro : le rouvre s'il disparait (Bluetooth, USB, pilote
+        reinitialise) au lieu de laisser Jarvis connecte mais sourd."""
+        reveil = self._reveil()
         if self.gain_reveil != 1.0:
             print(
                 f"  [wake] gain x{self.gain_reveil:g}, "
                 f"seuil {self.seuil_reveil:g}"
             )
-        print("Satellite prêt. Dites « Hey Jarvis ».")
+        attente, premiere, echecs = 1.0, True, 0
+        while not self.stop.is_set():
+            try:
+                flux = self._ouvrir_flux()
+            except Exception as exc:
+                echecs += 1
+                print(f"  [audio] micro indisponible ({type(exc).__name__}: "
+                      f"{str(exc)[:80]}) — nouvel essai dans {attente:.0f} s")
+                # Relire la liste des peripheriques (sd._terminate) coupe aussi un
+                # son en cours : seulement apres deux echecs d'ouverture de suite
+                # (un micro USB en cours de redemarrage revient souvent seul), et
+                # jamais pendant la lecture d'une reponse.
+                if echecs >= 2 and not LECTURE_EN_COURS.is_set():
+                    _reinitialiser_portaudio()
+                self.stop.wait(attente)
+                attente = min(attente * 2, 15.0)
+                continue
+            echecs = 0
+            if premiere:
+                print("Satellite prêt. Dites « Hey Jarvis ».")
+                premiere = False
+            else:
+                print("  [audio] micro retrouvé — j'écoute de nouveau.")
+            debut = time.monotonic()
+            try:
+                self._ecouter(flux, reveil)
+            except Exception as exc:
+                print(f"  [audio] micro perdu ({type(exc).__name__}: "
+                      f"{str(exc)[:80]}) — reconnexion…")
+                self.fermer_relance()
+                _evenement("etat", "veille")
+                # Une panne immediate et repetee ne doit pas tourner en boucle folle.
+                if time.monotonic() - debut < 5.0:
+                    self.stop.wait(attente)
+                    attente = min(attente * 2, 15.0)
+                else:
+                    attente = 1.0
+            finally:
+                try:
+                    flux.stop()
+                    flux.close()
+                except Exception:
+                    pass
+            reveil.reset()
+
+    def _ecouter(self, flux, reveil):
+        """Boucle d'ecoute sur un micro ouvert ; leve une exception s'il tombe."""
         blocs_lus = 0
-        try:
-            while not self.stop.is_set():
-                bloc = self._lire_bloc(flux)
-                blocs_lus += 1
-                if blocs_lus % 4 == 0 and "_evenement_callback" in CONF:
-                    _evenement("niveau", self._niveau(bloc))
-                if self.occupe.is_set():
-                    reveil.reset()
-                    continue
-                relance = self._relance_restante()
-                if relance > 0:
-                    reveil.reset()
-                    print(f"  [conversation] écoute ouverte {relance:.0f}s")
-                    pcm = self._capturer_enonce(
-                        flux, relance, "  [conversation] retour en veille")
-                    self.fermer_relance()
-                    if pcm:
-                        self.occupe.set()
-                        self.file.put(pcm)
-                        _evenement("etat", "reflexion")
-                    else:
-                        _evenement("etat", "veille")
-                    continue
-                bloc_reveil = np.clip(bloc * self.gain_reveil, -1, 1)
-                scores = reveil.predict((bloc_reveil * 32767).astype(np.int16))
-                score_reveil = max(scores.values())
-                if score_reveil < self.seuil_reveil:
-                    continue
+        blocs_muets = 0
+        muet_max = int(self.SECONDES_MUET_MAX * TAUX / BLOC)
+        # Une liste de micros permet de passer au suivant si celui-ci devient muet
+        # (appli du micro virtuel fermee) ; avec un seul micro, rien a essayer.
+        surveiller_muet = (isinstance(self.choix_micro, (list, tuple))
+                           and len(self.choix_micro) > 1)
+        while not self.stop.is_set():
+            bloc = self._lire_bloc(flux)
+            blocs_lus += 1
+            if surveiller_muet:
+                blocs_muets = blocs_muets + 1 if self.dernier_bloc_muet else 0
+                if blocs_muets > muet_max:
+                    raise _MicroMuet(f"{self.nom_micro} ne renvoie que du silence")
+            if blocs_lus % 4 == 0 and "_evenement_callback" in CONF:
+                _evenement("niveau", self._niveau(bloc))
+            if self.occupe.is_set():
                 reveil.reset()
-                accepte, accuse_vocal = self._demander_reveil(score_reveil)
-                if not accepte:
-                    print("  [wake] ignoré — un micro plus proche a répondu")
-                    continue
-                print("  [wake] Hey Jarvis — j'écoute")
-                _evenement("reveil")
-                # Le serveur joue normalement « Oui ? » avant d'autoriser la
-                # capture. Un bip local reste le repli si le TTS est indisponible.
-                if not accuse_vocal:
-                    self._bip()
-                # Le micro continue de tourner pendant le bip. Purge son écho
-                # résiduel avant d'attendre la question, sinon Whisper reçoit
-                # parfois seulement le bip puis du silence.
-                for _ in range(self.blocs_purge_bip):
-                    self._lire_bloc(flux)
+                continue
+            relance = self._relance_restante()
+            if relance > 0:
+                reveil.reset()
+                print(f"  [conversation] écoute ouverte {relance:.0f}s")
                 pcm = self._capturer_enonce(
-                    flux, self.attente_parole,
-                    "  [micro] aucune question après le wake word")
-                if not pcm:
-                    continue
-                self.occupe.set()
-                self.file.put(pcm)
-        finally:
-            flux.stop(); flux.close()
+                    flux, relance, "  [conversation] retour en veille")
+                self.fermer_relance()
+                if pcm:
+                    self.occupe.set()
+                    self.file.put(pcm)
+                    _evenement("etat", "reflexion")
+                else:
+                    _evenement("etat", "veille")
+                continue
+            bloc_reveil = np.clip(bloc * self.gain_reveil, -1, 1)
+            scores = reveil.predict((bloc_reveil * 32767).astype(np.int16))
+            score_reveil = max(scores.values())
+            if score_reveil < self.seuil_reveil:
+                continue
+            reveil.reset()
+            accepte, accuse_vocal = self._demander_reveil(score_reveil)
+            if not accepte:
+                print("  [wake] ignoré — un micro plus proche a répondu")
+                continue
+            print("  [wake] Hey Jarvis — j'écoute")
+            _evenement("reveil")
+            # Le serveur joue normalement « Oui ? » avant d'autoriser la
+            # capture. Un bip local reste le repli si le TTS est indisponible.
+            if not accuse_vocal:
+                self._bip()
+            # Le micro continue de tourner pendant le bip. Purge son écho
+            # résiduel avant d'attendre la question, sinon Whisper reçoit
+            # parfois seulement le bip puis du silence.
+            for _ in range(self.blocs_purge_bip):
+                self._lire_bloc(flux)
+            pcm = self._capturer_enonce(
+                flux, self.attente_parole,
+                "  [micro] aucune question après le wake word")
+            if not pcm:
+                continue
+            self.occupe.set()
+            self.file.put(pcm)
 
 
 def _jouer_alsa_partage(pcm, freq):
@@ -324,7 +470,20 @@ def _jouer_alsa_partage(pcm, freq):
         return False
 
 
+# Pose pendant la lecture d'une reponse : le fil du micro ne relit pas alors la
+# liste des peripheriques audio (sd._terminate couperait le son en cours).
+LECTURE_EN_COURS = threading.Event()
+
+
 def _jouer(pcm, freq):
+    LECTURE_EN_COURS.set()
+    try:
+        return _jouer_pcm(pcm, freq)
+    finally:
+        LECTURE_EN_COURS.clear()
+
+
+def _jouer_pcm(pcm, freq):
     """Joue du PCM mono en l'adaptant au taux natif du haut-parleur.
 
     Certains périphériques USB, notamment les speakerphones, n'acceptent que
@@ -436,7 +595,12 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
                     audio, freq = bytearray(), int(d.get("freq", TAUX))
                 elif t == "audio_fin":
                     _evenement("parole_debut")
-                    _jouer(bytes(audio), freq); audio = bytearray()
+                    # Lecture dans un fil : bloquer la boucle pendant une longue
+                    # reponse (brief) empechait de repondre aux pings, et le
+                    # serveur coupait la connexion (1011 keepalive ping timeout).
+                    # L'ordre des messages est garde : on attend la fin ici.
+                    await asyncio.to_thread(_jouer, bytes(audio), freq)
+                    audio = bytearray()
                     _evenement("parole_fin")
                 elif t == "relance":
                     micro.ouvrir_relance(d.get("secondes"))
@@ -476,6 +640,7 @@ CONF = {}
 
 def main():
     global CONF
+    sorties_utf8()
     CONF = _conf()
     url = str(CONF.get("pc_url", "")).strip()
     satellite = str(CONF.get("satellite_id", "")).strip()

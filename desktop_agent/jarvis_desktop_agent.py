@@ -413,6 +413,14 @@ async def boucle(conf, actions):
 
 
 def main():
+    # Le lanceur redirige la sortie vers logs/agent.log, en cp1252 par defaut sous
+    # Windows : un emoji dans une reponse faisait planter un print et tombait la
+    # session au milieu de la reponse. UTF-8 partout.
+    for flux in (sys.stdout, sys.stderr):
+        try:
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     conf = charger_config()
     manquants = [nom for nom in ("serveur_url", "agent_id", "token")
                  if not str(conf.get(nom, "") or "").strip()]

@@ -41,7 +41,10 @@ audio:
   pc_url: "ws://ADRESSE_DU_SERVEUR:8791/satellite"
   satellite_id: "bureau"
   token: "MEME_SECRET_QUE_SATELLITES_COTE_SERVEUR"
-  micro: null
+  # null suit le micro par defaut de Windows, qui peut basculer tout seul sur un
+  # casque ou une enceinte Bluetooth. Mieux : des noms (ou morceaux de nom) par
+  # ordre de preference ; un micro muet ou absent passe au suivant.
+  micro: null                  # ex. ["MOTIV Mix", "Shure MVX2U"]
   haut_parleur: null
   sorties: {}
   seuil_reveil: 0.5
