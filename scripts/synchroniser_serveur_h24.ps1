@@ -1,7 +1,11 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel', 'tester_colis', 'verifier_securite', 'autoriser_lumieres_iphone')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel', 'tester_colis', 'verifier_securite', 'autoriser_lumieres_iphone', 'lire_edition')]
     [string]$Action = 'etat',
+
+    # Utilise uniquement par lire_edition : partie de l'edition du jour a lire.
+    [ValidateSet('actualites', 'reseaux')]
+    [string]$Section = 'actualites',
 
     [string]$Configuration = '',
 
@@ -510,6 +514,63 @@ if mail._mail_configure():
     print("phrase_du_brief=" + (colis.colis_du_brief() or "(rien a signaler)"))
 '@
 `$fichier = Join-Path `$env:TEMP 'jarvis_tester_colis.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+Remove-Item -LiteralPath `$fichier -Force
+"@
+    exit 0
+}
+
+if ($Action -eq 'lire_edition') {
+    # Lecture seule : titres, resumes et sources de la derniere edition Signal Matin.
+    # actualites = a la une, rubriques, tech, brief Tech & IA, curiosites ;
+    # reseaux = Instagram (social_digest) et Discord (community_digest), resumes
+    # seulement. Rien n'est genere ni imprime.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+Set-Location `$repo
+`$py = @'
+import json, sys
+from pathlib import Path
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+SECTION = "$Section"
+chemin = sorted(Path("output/data").glob("????-??-??-signal-matin.json"))[-1]
+e = json.loads(chemin.read_text(encoding="utf-8"))
+print("edition du " + chemin.name[:10])
+def item(n):
+    source = (n.get("source") or {}).get("name", "")
+    print("- " + n.get("title", "") + (" (" + source + ")" if source else ""))
+    if n.get("summary"):
+        print("  " + n["summary"])
+if SECTION == "actualites":
+    news = e.get("news") or {}
+    if news.get("lead"):
+        print("== A la une"); item(news["lead"])
+    for cle, nom in (("world", "Monde"), ("france", "France"), ("economy", "Economie"),
+                     ("society", "Societe"), ("science", "Sciences"), ("culture", "Culture")):
+        if news.get(cle):
+            print("== " + nom); [item(n) for n in news[cle]]
+    if e.get("tech_news"):
+        print("== Tech"); [item(n) for n in e["tech_news"]]
+    brief = e.get("tech_brief")
+    if brief:
+        print("== Brief Tech & IA : " + brief.get("title", ""))
+        for ligne in brief.get("essentials", []): print("- " + ligne)
+        for a in brief.get("analyses", []): print("  analyse : " + a.get("subject", ""))
+    if e.get("curiosity_news"):
+        print("== Curiosites"); [item(n) for n in e["curiosity_news"]]
+else:
+    for cle, nom in (("social_digest", "Instagram"), ("community_digest", "Discord")):
+        print("== " + nom)
+        for d in e.get(cle) or []: item(d)
+        if not e.get(cle): print("(vide)")
+print("== Etat des sources")
+for s in e.get("sources", []):
+    if SECTION == "actualites" or s.get("name") in ("Instagram", "Discord"):
+        print("- " + str(s.get("name")) + " : " + str(s.get("state")) + " " + str(s.get("detail", "")))
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_lire_edition.py'
 Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
 & (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
 Remove-Item -LiteralPath `$fichier -Force
