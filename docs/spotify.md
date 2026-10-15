@@ -62,6 +62,21 @@ Spotify. Ainsi, « lance Spotify » ou « lance ma playlist Chill » depuis la c
 cible son récepteur ; pause, précédent et suivant restent dans la même pièce. Une
 commande prononcée sur le PC conserve la sortie locale.
 
+Pour qu'un simple « lance Spotify » dans une pièce démarre toujours la même
+playlist, indique son nom exact (elle doit exister sur ton compte) :
+
+```yaml
+spotify:
+  playlist_lancement: "Chill"
+```
+
+Si la musique joue déjà dans la pièce, Jarvis n'y touche pas. Sans ce réglage,
+il reprend la dernière musique écoutée. Dans les deux cas, il vérifie que
+l'enceinte joue vraiment avant d'annoncer « je lance » : un récepteur librespot
+peut accepter la demande puis rester muet (« context is not available ») quand
+le dernier titre a été lancé hors d'un album ou d'une playlist. Jarvis relance
+alors ce titre dans son album.
+
 Après l'installation d'un nouveau récepteur, sélectionne-le une première fois dans
 **Appareils disponibles** de l'application Spotify officielle. Spotify Premium est
 requis par librespot/Raspotify.

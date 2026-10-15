@@ -208,6 +208,13 @@ def _transferer_lecture(device_id, lecture=True):
     }), timeout=15)
 
 
+def _jouer_corps(device_id, corps):
+    """Lance /me/player/play avec un corps précis sur un appareil Connect."""
+    return requests.put(f"{_API}/me/player/play", headers=_h(),
+                        params={"device_id": device_id},
+                        data=json.dumps(corps), timeout=15)
+
+
 def _commande_lecture(device_id, action):
     """Pause, piste suivante ou précédente sur un appareil Spotify précis."""
     chemins = {
@@ -227,6 +234,90 @@ def _requete_reussie(reponse):
         return 200 <= int(reponse.status_code) < 300
     except (AttributeError, TypeError, ValueError):
         return False
+
+
+def _joue_sur(device_id, attente=4.0):
+    """Vrai si Spotify joue réellement sur cet appareil (vérifié pendant ~attente s).
+
+    Un 204 de l'API veut seulement dire « demande transmise » : l'enceinte peut
+    ensuite refuser de jouer (vu sur Raspotify : « context is not available »)."""
+    fin = time.monotonic() + attente
+    while True:
+        if _joue_la(_etat_ou_vide(), device_id):
+            return True
+        if time.monotonic() >= fin:
+            return False
+        time.sleep(0.5)
+
+
+def _etat_ou_vide():
+    """État Spotify Connect courant, {} si l'API ne répond pas."""
+    try:
+        return _etat_lecture()
+    except Exception:
+        return {}
+
+
+def _joue_la(etat, device_id):
+    """Vrai si cet état Spotify montre une lecture en cours sur cet appareil."""
+    return bool((etat or {}).get("is_playing")) and \
+        ((etat or {}).get("device") or {}).get("id") == device_id
+
+
+def _playlist_lancement():
+    """(URI, nom) de la playlist jouée par « lance Spotify » dans une pièce.
+
+    Nom lu dans spotify.playlist_lancement ; URI None si le réglage est vide ou si
+    la playlist n'existe pas sur le compte (jamais créée par erreur)."""
+    nom = str(reglage("spotify.playlist_lancement", "") or "").strip()
+    if not nom:
+        return None, ""
+    pid = _playlist_id(nom, creer=False)
+    return (f"spotify:playlist:{pid}" if pid else None), nom
+
+
+def _corps_reprise(etat):
+    """Corps de /me/player/play qui rejoue le morceau courant à la même position,
+    dans un contexte que l'enceinte sait charger : la playlist ou l'album d'origine,
+    à défaut l'album du titre (un titre « isolé » n'a pas de contexte chargeable)."""
+    item = (etat or {}).get("item") or {}
+    uri = item.get("uri")
+    if not uri:
+        return None
+    corps = {"position_ms": int((etat or {}).get("progress_ms") or 0)}
+    contexte = ((etat or {}).get("context") or {}).get("uri")
+    album = (item.get("album") or {}).get("uri")
+    if contexte:
+        corps.update(context_uri=contexte, offset={"uri": uri})
+    elif album and item.get("type", "track") == "track":
+        corps.update(context_uri=album, offset={"uri": uri})
+    else:
+        corps["uris"] = [uri]
+    return corps
+
+
+def _demarrer_sur_appareil(device_id, etat_avant=None):
+    """Fait jouer Spotify sur un appareil Connect et vérifie que ça joue.
+
+    1. Rien à faire si la musique joue déjà là.
+    2. Bascule de la lecture en cours (cas normal).
+    3. Si l'enceinte reste muette : relance explicite du morceau courant dans son
+       album ou sa playlist.
+    Renvoie True seulement si la lecture a réellement démarré."""
+    if etat_avant is None:
+        etat_avant = _etat_ou_vide()
+    if _joue_la(etat_avant, device_id):
+        return True
+    # Attente courte après la bascule (la relance est sans risque), plus longue
+    # après la relance : c'est elle qui décide du message annoncé.
+    if (_requete_reussie(_transferer_lecture(device_id, lecture=True))
+            and _joue_sur(device_id, attente=3.0)):
+        return True
+    corps = _corps_reprise(etat_avant)
+    if corps is None:
+        return False
+    return (_requete_reussie(_jouer_corps(device_id, corps))
+            and _joue_sur(device_id, attente=6.0))
 
 
 def _ouvrir_application_spotify():
@@ -300,7 +391,8 @@ def auto_ajouter(titre, artiste):
 @outil(
     nom="lancer_spotify",
     description="Ouvre Spotify puis reprend immédiatement la lecture en cours. "
-                "Pour « lance Spotify » ou « ouvre Spotify ». N'utilise pas Astra.",
+                "Pour « lance Spotify » ou « ouvre Spotify ». Dans une pièce satellite, "
+                "joue la playlist par défaut si elle est configurée. N'utilise pas Astra.",
     parametres={
         "type": "object",
         "properties": {
@@ -323,10 +415,26 @@ def lancer_spotify(piece: str = "") -> str:
             if not appareil:
                 return (f"Je ne vois pas encore {attendu}. Dans Spotify, sélectionne-le "
                         "une première fois dans Appareils disponibles.")
-            r = _transferer_lecture(appareil["id"], lecture=True)
-            if _requete_reussie(r):
+            # On n'annonce « je lance » que si la musique joue vraiment.
+            etat = _etat_ou_vide()
+            if _joue_la(etat, appareil["id"]):
+                return f"Spotify joue déjà sur {attendu}."
+            uri, nom = _playlist_lancement()
+            if uri:
+                # Playlist par défaut de l'utilisatrice : un contexte explicite, que
+                # l'enceinte sait toujours charger (contrairement à une simple bascule).
+                if (_requete_reussie(_jouer_corps(appareil["id"], {"context_uri": uri}))
+                        and _joue_sur(appareil["id"], attente=6.0)):
+                    return f"Je lance ta playlist {nom} sur {attendu}."
+                return f"Ta playlist {nom} n'a pas démarré sur {attendu}."
+            if _demarrer_sur_appareil(appareil["id"], etat):
+                if nom:
+                    return (f"Je n'ai pas trouvé ta playlist {nom}, alors je reprends "
+                            f"ta dernière musique sur {attendu}.")
                 return f"Je lance Spotify sur {attendu}."
-            return f"Spotify n'a pas pu lancer la lecture sur {attendu}."
+            return (f"Spotify n'a pas démarré sur {attendu} : l'enceinte a reçu la demande "
+                    "mais ne joue rien. Demande-moi une playlist précise, par exemple "
+                    "« mets ma playlist Chill ».")
         except Exception as e:
             return f"Spotify a échoué ({str(e)[:120]})."
 
@@ -411,6 +519,12 @@ def controler_spotify(action: str, piece: str) -> str:
             return (f"Je ne vois pas encore {attendu}. Sélectionne-le une première "
                     "fois dans les appareils Spotify.")
         actif = bool(appareil.get("is_active"))
+        if action == "reprendre":
+            # Même vérification que « lance Spotify » : annoncer seulement ce qui joue.
+            if _demarrer_sur_appareil(appareil["id"]):
+                return "Je reprends la musique."
+            return (f"La musique n'a pas repris sur {attendu}. Demande-moi une playlist "
+                    "précise, par exemple « mets ma playlist Chill ».")
         if action == "pause":
             # Raspotify peut publier is_active=False avec un léger retard alors
             # que le son joue encore. Ne jamais déduire « déjà en pause » de ce
@@ -440,18 +554,12 @@ def controler_spotify(action: str, piece: str) -> str:
             r = _transferer_lecture(appareil["id"], lecture=True)
             if not _requete_reussie(r):
                 return f"Spotify n'a pas pu activer {attendu}."
-            if action == "reprendre":
-                return "Je reprends la musique."
             time.sleep(0.2)
-        if action == "reprendre":
-            r = _reprendre_lecture(appareil["id"])
-        else:
-            r = _commande_lecture(appareil["id"], action)
+        r = _commande_lecture(appareil["id"], action)
         if not _requete_reussie(r):
             return f"Spotify n'a pas pu exécuter la commande sur {attendu}."
         messages = {
             "pause": "Musique en pause.",
-            "reprendre": "Je reprends la musique.",
             "suivant": "Je passe au morceau suivant.",
             "precedent": "Je reviens au morceau précédent.",
         }

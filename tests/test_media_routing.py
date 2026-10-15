@@ -8,6 +8,13 @@ from tools import media, spotify, systeme  # charge aussi l'outil controler_medi
 
 
 class MediaRoutingTests(unittest.TestCase):
+    def setUp(self):
+        # Par défaut aucune playlist de lancement : le config.yaml local ne doit
+        # pas influencer les tests. Les tests de la playlist la patchent eux-mêmes.
+        patcher = patch("tools.spotify._playlist_lancement", return_value=(None, ""))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_commandes_transport_utilisent_les_touches_media(self):
         cas = {
             "Hey Jarvis, change de musique": "suivant",
@@ -172,19 +179,183 @@ class MediaRoutingTests(unittest.TestCase):
         ouvrir.assert_called_once_with()
         reprendre.assert_not_called()
 
+    # État Spotify typique avant « lance Spotify » en cuisine : un titre en pause
+    # sur un autre appareil, écouté hors playlist (contexte absent).
+    ETAT_EN_PAUSE_AILLEURS = {
+        "is_playing": False, "device": {"id": "device-bureau"},
+        "context": None, "progress_ms": 61000,
+        "item": {"uri": "spotify:track:T1", "type": "track",
+                 "album": {"uri": "spotify:album:A1"}},
+    }
+    ETAT_JOUE_EN_CUISINE = {"is_playing": True, "device": {"id": "device-cuisine"}}
+
     def test_lancer_spotify_depuis_cuisine_transfere_vers_enceinte(self):
         appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
         with patch("tools.spotify._configure", return_value=True), \
                 patch("tools.spotify._appareil_piece",
                       return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._etat_lecture", side_effect=[
+                    self.ETAT_EN_PAUSE_AILLEURS, self.ETAT_JOUE_EN_CUISINE]), \
                 patch("tools.spotify._transferer_lecture",
                       return_value=SimpleNamespace(status_code=204)) as transferer, \
+                patch("tools.spotify._jouer_corps") as jouer, \
+                patch("tools.spotify.time.sleep"), \
                 patch("tools.spotify._ouvrir_application_spotify") as ouvrir:
             resultat = spotify.lancer_spotify(piece="cuisine")
 
         self.assertEqual(resultat, "Je lance Spotify sur Jarvis Cuisine.")
         transferer.assert_called_once_with("device-cuisine", lecture=True)
+        jouer.assert_not_called()
         ouvrir.assert_not_called()
+
+    def test_lancer_spotify_relance_le_titre_si_l_enceinte_reste_muette(self):
+        # Raspotify accepte le transfert (204) mais ne joue rien : « context is
+        # not available ». Jarvis relance alors le titre dans son album.
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._etat_lecture",
+                      return_value=self.ETAT_EN_PAUSE_AILLEURS), \
+                patch("tools.spotify._transferer_lecture",
+                      return_value=SimpleNamespace(status_code=204)), \
+                patch("tools.spotify._joue_sur", side_effect=[False, True]), \
+                patch("tools.spotify._jouer_corps",
+                      return_value=SimpleNamespace(status_code=204)) as jouer:
+            resultat = spotify.lancer_spotify(piece="cuisine")
+
+        self.assertEqual(resultat, "Je lance Spotify sur Jarvis Cuisine.")
+        jouer.assert_called_once_with("device-cuisine", {
+            "context_uri": "spotify:album:A1",
+            "offset": {"uri": "spotify:track:T1"},
+            "position_ms": 61000,
+        })
+
+    def test_lancer_spotify_n_annonce_pas_un_succes_sans_musique(self):
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._etat_lecture",
+                      return_value=self.ETAT_EN_PAUSE_AILLEURS), \
+                patch("tools.spotify._transferer_lecture",
+                      return_value=SimpleNamespace(status_code=204)), \
+                patch("tools.spotify._joue_sur", return_value=False), \
+                patch("tools.spotify._jouer_corps",
+                      return_value=SimpleNamespace(status_code=204)):
+            resultat = spotify.lancer_spotify(piece="cuisine")
+
+        self.assertTrue(resultat.startswith("Spotify n'a pas démarré sur Jarvis Cuisine"))
+        self.assertNotIn("Je lance", resultat)
+
+    def test_lancer_spotify_ne_touche_a_rien_si_la_cuisine_joue_deja(self):
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._etat_lecture",
+                      return_value=self.ETAT_JOUE_EN_CUISINE), \
+                patch("tools.spotify._transferer_lecture") as transferer, \
+                patch("tools.spotify._jouer_corps") as jouer:
+            resultat = spotify.lancer_spotify(piece="cuisine")
+
+        self.assertEqual(resultat, "Spotify joue déjà sur Jarvis Cuisine.")
+        transferer.assert_not_called()
+        jouer.assert_not_called()
+
+    def test_lancer_spotify_joue_la_playlist_par_defaut_de_la_piece(self):
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._playlist_lancement",
+                      return_value=("spotify:playlist:P9", "Chill")), \
+                patch("tools.spotify._etat_lecture",
+                      return_value=self.ETAT_EN_PAUSE_AILLEURS), \
+                patch("tools.spotify._transferer_lecture") as transferer, \
+                patch("tools.spotify._jouer_corps",
+                      return_value=SimpleNamespace(status_code=204)) as jouer, \
+                patch("tools.spotify._joue_sur", return_value=True) as verifier:
+            resultat = spotify.lancer_spotify(piece="cuisine")
+
+        self.assertEqual(resultat, "Je lance ta playlist Chill sur Jarvis Cuisine.")
+        jouer.assert_called_once_with("device-cuisine",
+                                      {"context_uri": "spotify:playlist:P9"})
+        verifier.assert_called_once_with("device-cuisine", attente=6.0)
+        transferer.assert_not_called()
+
+    def test_playlist_par_defaut_ne_coupe_pas_la_musique_en_cours(self):
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._playlist_lancement",
+                      return_value=("spotify:playlist:P9", "Chill")), \
+                patch("tools.spotify._etat_lecture",
+                      return_value=self.ETAT_JOUE_EN_CUISINE), \
+                patch("tools.spotify._jouer_corps") as jouer:
+            resultat = spotify.lancer_spotify(piece="cuisine")
+
+        self.assertEqual(resultat, "Spotify joue déjà sur Jarvis Cuisine.")
+        jouer.assert_not_called()
+
+    def test_playlist_par_defaut_muette_le_dit(self):
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._playlist_lancement",
+                      return_value=("spotify:playlist:P9", "Chill")), \
+                patch("tools.spotify._etat_lecture", return_value={}), \
+                patch("tools.spotify._jouer_corps",
+                      return_value=SimpleNamespace(status_code=204)), \
+                patch("tools.spotify._joue_sur", return_value=False):
+            resultat = spotify.lancer_spotify(piece="cuisine")
+
+        self.assertEqual(resultat, "Ta playlist Chill n'a pas démarré sur Jarvis Cuisine.")
+
+    def test_playlist_par_defaut_introuvable_reprend_la_derniere_musique(self):
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._playlist_lancement", return_value=(None, "Chill")), \
+                patch("tools.spotify._etat_lecture",
+                      return_value=self.ETAT_EN_PAUSE_AILLEURS), \
+                patch("tools.spotify._transferer_lecture",
+                      return_value=SimpleNamespace(status_code=204)) as transferer, \
+                patch("tools.spotify._joue_sur", return_value=True):
+            resultat = spotify.lancer_spotify(piece="cuisine")
+
+        self.assertEqual(resultat, "Je n'ai pas trouvé ta playlist Chill, alors je "
+                                   "reprends ta dernière musique sur Jarvis Cuisine.")
+        transferer.assert_called_once_with("device-cuisine", lecture=True)
+
+
+    def test_corps_de_reprise_garde_la_playlist_d_origine(self):
+        etat = dict(self.ETAT_EN_PAUSE_AILLEURS,
+                    context={"uri": "spotify:playlist:P1"})
+        self.assertEqual(spotify._corps_reprise(etat), {
+            "context_uri": "spotify:playlist:P1",
+            "offset": {"uri": "spotify:track:T1"},
+            "position_ms": 61000,
+        })
+        episode = {"item": {"uri": "spotify:episode:E1", "type": "episode"}}
+        self.assertEqual(spotify._corps_reprise(episode),
+                         {"uris": ["spotify:episode:E1"], "position_ms": 0})
+        self.assertIsNone(spotify._corps_reprise({}))
+
+    def test_joue_sur_attend_la_lecture_puis_abandonne(self):
+        with patch("tools.spotify._etat_lecture", side_effect=[
+                    {}, self.ETAT_JOUE_EN_CUISINE]), \
+                patch("tools.spotify.time.sleep"):
+            self.assertTrue(spotify._joue_sur("device-cuisine"))
+        with patch("tools.spotify._etat_lecture",
+                   return_value=self.ETAT_JOUE_EN_CUISINE), \
+                patch("tools.spotify.time.monotonic", side_effect=[0.0, 5.0]), \
+                patch("tools.spotify.time.sleep"):
+            # Ça joue, mais sur un autre appareil que celui demandé.
+            self.assertFalse(spotify._joue_sur("device-bureau"))
 
     def test_reprendre_sur_enceinte_inactive_transfere_d_abord(self):
         appareil = {
@@ -194,14 +365,30 @@ class MediaRoutingTests(unittest.TestCase):
         with patch("tools.spotify._configure", return_value=True), \
                 patch("tools.spotify._appareil_piece",
                       return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._etat_lecture", side_effect=[
+                    self.ETAT_EN_PAUSE_AILLEURS, self.ETAT_JOUE_EN_CUISINE]), \
                 patch("tools.spotify._transferer_lecture",
                       return_value=SimpleNamespace(status_code=204)) as transferer, \
-                patch("tools.spotify._reprendre_lecture") as reprendre:
+                patch("tools.spotify.time.sleep"), \
+                patch("tools.spotify._jouer_corps") as jouer:
             resultat = spotify.controler_spotify("reprendre", "cuisine")
 
         self.assertEqual(resultat, "Je reprends la musique.")
         transferer.assert_called_once_with("device-cuisine", lecture=True)
-        reprendre.assert_not_called()
+        jouer.assert_not_called()
+
+    def test_reprendre_sans_musique_le_dit(self):
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine", "is_active": True}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._etat_lecture", return_value={}), \
+                patch("tools.spotify._transferer_lecture",
+                      return_value=SimpleNamespace(status_code=204)), \
+                patch("tools.spotify._joue_sur", return_value=False):
+            resultat = spotify.controler_spotify("reprendre", "cuisine")
+
+        self.assertTrue(resultat.startswith("La musique n'a pas repris sur Jarvis Cuisine"))
 
     def test_suivant_sur_enceinte_inactive_transfere_puis_commande(self):
         appareil = {
@@ -334,6 +521,21 @@ class MediaRoutingTests(unittest.TestCase):
         ouvrir.assert_called_once_with(
             url="https://www.netflix.com/search?q=Arcane")
         self.assertIn("Netflix uniquement", interagir.call_args.args[0])
+
+
+class PlaylistLancementTests(unittest.TestCase):
+    """La vraie lecture du réglage, sans le patch par défaut de MediaRoutingTests."""
+
+    def test_playlist_de_lancement_lue_dans_la_configuration(self):
+        with patch("tools.spotify.reglage", return_value=" Chill "), \
+                patch("tools.spotify._playlist_id", return_value="P9") as chercher:
+            self.assertEqual(spotify._playlist_lancement(),
+                             ("spotify:playlist:P9", "Chill"))
+        chercher.assert_called_once_with("Chill", creer=False)
+        with patch("tools.spotify.reglage", return_value=""), \
+                patch("tools.spotify._playlist_id") as chercher:
+            self.assertEqual(spotify._playlist_lancement(), (None, ""))
+        chercher.assert_not_called()
 
 
 if __name__ == "__main__":
