@@ -175,39 +175,82 @@ def colis_en_cours(jours=None):
     return analyser(_lire_entetes(max(1, min(jours, 30))))
 
 
+def _partie_shop(bref):
+    """Ce que dit Shop, lu sur le PC qui detient la session Shop (tools/shop.py).
+
+    Cerveau sur un serveur : la lecture est demandee au poste principal. bref=True
+    (brief) : "" pour tout ce qui n'est pas une reponse Shop exploitable."""
+    if not bool(reglage("shop.actif", True)):
+        return ""
+    from core import poste_distant
+    from tools import shop
+    if poste_distant._principal():
+        if not poste_distant.agent_disponible():
+            return "" if bref else "Shop : le PC du bureau est éteint, je ne peux pas lire tes commandes."
+        reponse = poste_distant.executer_outil_principal(
+            "commandes_shop", {"bref": bref}, timeout=30.0 if bref else 45.0)
+        # Une erreur de transport revient aussi en texte : seule une vraie reponse
+        # de l'outil commence par « Shop ».
+        if isinstance(reponse, str) and reponse.startswith(shop.PREFIXE):
+            return reponse
+        return "" if bref else "Shop : le PC du bureau n'a pas répondu."
+    return shop.commandes_shop(bref=bref)
+
+
 def colis_du_brief():
-    """Phrase courte pour le brief, ou "" s'il n'y a rien a dire (ou pas de messagerie)."""
-    if not bool(reglage("colis.dans_brief", True)) or not mail._mail_configure():
+    """Phrase courte pour le brief (mails + Shop), ou "" s'il n'y a rien a dire."""
+    if not bool(reglage("colis.dans_brief", True)):
         return ""
+    morceaux = []
+    if mail._mail_configure():
+        try:
+            colis = colis_en_cours()
+        except Exception:
+            colis = []
+        if colis:
+            phrases = [_phrase(c) for c in colis[:5]]
+            liste = phrases[0] if len(phrases) == 1 else ", ".join(phrases[:-1]) + " et " + phrases[-1]
+            morceaux.append(f"Côté colis : {liste}.")
     try:
-        colis = colis_en_cours()
+        texte_shop = _partie_shop(bref=True)
     except Exception:
-        return ""
-    if not colis:
-        return ""
-    phrases = [_phrase(c) for c in colis[:5]]
-    liste = phrases[0] if len(phrases) == 1 else ", ".join(phrases[:-1]) + " et " + phrases[-1]
-    return f"Côté colis : {liste}."
+        texte_shop = ""
+    if texte_shop:
+        morceaux.append(texte_shop)
+    return " ".join(morceaux)
 
 
 @outil(
     nom="suivi_colis",
     description="Indique ou en sont les colis attendus, d'apres les mails d'expedition et "
-                "de livraison recents. A utiliser pour 'ou en sont mes colis', 'j'ai un "
-                "colis', 'mon colis arrive quand', 'qu'est-ce qui doit arriver'.",
+                "de livraison recents ET les commandes suivies dans Shop. A utiliser pour "
+                "'ou en sont mes colis', 'j'ai un colis', 'mon colis arrive quand', "
+                "'qu'est-ce qui doit arriver'.",
     parametres={"type": "object", "properties": {}},
     lent=True,
-    phrase_attente="Je regarde tes mails de livraison.",
+    phrase_attente="Je regarde tes mails de livraison et Shop.",
 )
 def suivi_colis() -> str:
+    morceaux = []
     if not mail._mail_configure():
-        return "La messagerie n'est pas configuree, je ne peux pas suivre tes colis."
+        morceaux.append("La messagerie n'est pas configurée.")
+    else:
+        try:
+            colis = colis_en_cours()
+        except Exception as e:
+            morceaux.append(f"Impossible de vérifier tes mails de livraison : {e}")
+        else:
+            if colis:
+                nombre = len(colis)
+                detail = " ; ".join(_phrase(c) for c in colis[:8])
+                morceaux.append(f"Dans tes mails, {nombre} colis "
+                                f"{'suivi' if nombre == 1 else 'suivis'} : {detail}.")
+            else:
+                morceaux.append("Aucun colis dans tes mails de ces derniers jours.")
     try:
-        colis = colis_en_cours()
+        texte_shop = _partie_shop(bref=False)
     except Exception as e:
-        return f"Impossible de verifier tes colis : {e}"
-    if not colis:
-        return "Aucun colis en cours dans tes mails de ces derniers jours."
-    nombre = len(colis)
-    detail = " ; ".join(_phrase(c) for c in colis[:8])
-    return f"Tu as {nombre} colis {'suivi' if nombre == 1 else 'suivis'} : {detail}."
+        texte_shop = f"Shop : lecture impossible ({type(e).__name__})."
+    if texte_shop:
+        morceaux.append(texte_shop)
+    return " ".join(morceaux)

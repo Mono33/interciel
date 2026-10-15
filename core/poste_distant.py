@@ -39,7 +39,7 @@ ACTIONS_AUTORISEES = frozenset({
 OUTILS_POSTE = frozenset({
     "afficher_reponse", "afficher_reponses", "browser_close_tabs",
     "browser_current_page", "browser_interact", "browser_open", "browser_tabs",
-    "capture_screen", "cliquer_ecran", "controler_gestes", "controler_media",
+    "capture_screen", "cliquer_ecran", "commandes_shop", "controler_gestes", "controler_media",
     "eteindre_pc", "annuler_extinction", "get_system_stats", "identifier_musique", "lancer_calibration_gestes",
     "lancer_demo_gestes", "lancer_mode_regard", "launch_app", "lire_netflix",
     "mode_silencieux_visuel", "ouvrir_application", "quitter_mode_regard",

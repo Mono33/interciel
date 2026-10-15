@@ -75,6 +75,12 @@ class AnalyseTest(unittest.TestCase):
 
 
 class BriefTest(unittest.TestCase):
+    def setUp(self):
+        # La partie Shop (navigateur reel) est testee a part : tests/test_shop.py.
+        sans_shop = patch.object(colis, "_partie_shop", return_value="")
+        sans_shop.start()
+        self.addCleanup(sans_shop.stop)
+
     def test_phrase_du_brief(self):
         trouves = [{"marchand": "Vinted", "etape": "relais"},
                    {"marchand": "Zara", "etape": "expedie"}]

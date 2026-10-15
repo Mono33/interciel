@@ -233,7 +233,7 @@ def phrase_attente(noms):
 # piegees : il est balise comme donnees non fiables, et pendant le reste du tour
 # toute action qui n'est pas une simple lecture demande une confirmation vocale.
 SOURCES_EXTERNES = frozenset({
-    "lire_mails", "lire_mail", "faire_brief", "suivi_colis",
+    "lire_mails", "lire_mail", "faire_brief", "suivi_colis", "commandes_shop",
     "browser_current_page", "browser_tabs", "chercher_web", "chercher_inspiration",
     "get_events", "get_deadlines", "get_mentions_summary", "get_channel_summary",
     "instagram_resume", "capture_screen", "taches_hermes", "deleguer_a_hermes",
