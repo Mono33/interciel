@@ -11,9 +11,11 @@ class MediaRoutingTests(unittest.TestCase):
     def setUp(self):
         # Par défaut aucune playlist de lancement : le config.yaml local ne doit
         # pas influencer les tests. Les tests de la playlist la patchent eux-mêmes.
-        patcher = patch("tools.spotify._playlist_lancement", return_value=(None, ""))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for cible, valeur in (("tools.spotify._playlist_lancement", (None, "")),
+                              ("tools.spotify._lancement_aleatoire", False)):
+            patcher = patch(cible, return_value=valeur)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_commandes_transport_utilisent_les_touches_media(self):
         cas = {
@@ -284,6 +286,51 @@ class MediaRoutingTests(unittest.TestCase):
         verifier.assert_called_once_with("device-cuisine", attente=6.0)
         transferer.assert_not_called()
 
+    def _lancer_playlist_aleatoire(self, total, activation):
+        appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
+        with patch("tools.spotify._configure", return_value=True), \
+                patch("tools.spotify._appareil_piece",
+                      return_value=(appareil, "Jarvis Cuisine")), \
+                patch("tools.spotify._playlist_lancement",
+                      return_value=("spotify:playlist:P9", "Chill")), \
+                patch("tools.spotify._lancement_aleatoire", return_value=True), \
+                patch("tools.spotify._etat_lecture", return_value={}), \
+                patch("tools.spotify._nombre_titres", return_value=total), \
+                patch("tools.spotify.random.randrange", return_value=42) as tirage, \
+                patch("tools.spotify._jouer_corps",
+                      return_value=SimpleNamespace(status_code=204)) as jouer, \
+                patch("tools.spotify._joue_sur", return_value=True), \
+                patch("tools.spotify._activer_aleatoire",
+                      return_value=activation) as melanger:
+            resultat = spotify.lancer_spotify(piece="cuisine")
+        return resultat, jouer, melanger, tirage
+
+    def test_playlist_par_defaut_demarre_au_hasard_en_aleatoire(self):
+        resultat, jouer, melanger, tirage = self._lancer_playlist_aleatoire(
+            1294, SimpleNamespace(status_code=204))
+
+        self.assertEqual(resultat,
+                         "Je lance ta playlist Chill en aléatoire sur Jarvis Cuisine.")
+        tirage.assert_called_once_with(1294)
+        jouer.assert_called_once_with("device-cuisine", {
+            "context_uri": "spotify:playlist:P9", "offset": {"position": 42}})
+        melanger.assert_called_once_with("device-cuisine")
+
+    def test_aleatoire_refuse_n_empeche_pas_la_musique(self):
+        resultat, _, melanger, _ = self._lancer_playlist_aleatoire(
+            1294, SimpleNamespace(status_code=404))
+
+        self.assertEqual(resultat, "Je lance ta playlist Chill sur Jarvis Cuisine.")
+        melanger.assert_called_once_with("device-cuisine")
+
+    def test_taille_inconnue_demarre_sans_position(self):
+        _, jouer, _, tirage = self._lancer_playlist_aleatoire(
+            None, SimpleNamespace(status_code=204))
+
+        tirage.assert_not_called()
+        jouer.assert_called_once_with("device-cuisine",
+                                      {"context_uri": "spotify:playlist:P9"})
+
     def test_playlist_par_defaut_ne_coupe_pas_la_musique_en_cours(self):
         appareil = {"id": "device-cuisine", "name": "Jarvis Cuisine"}
         with patch("tools.spotify._configure", return_value=True), \
@@ -536,6 +583,19 @@ class PlaylistLancementTests(unittest.TestCase):
                 patch("tools.spotify._playlist_id") as chercher:
             self.assertEqual(spotify._playlist_lancement(), (None, ""))
         chercher.assert_not_called()
+
+    def test_nombre_de_titres_lu_sur_l_endpoint_items(self):
+        # /playlists/{id}/tracks répond 403 depuis 2026 ; seul /items fonctionne.
+        reponse = SimpleNamespace(status_code=200, json=lambda: {"total": 1294})
+        with patch("tools.spotify._h", return_value={}), \
+                patch("tools.spotify.requests") as api:
+            api.get.return_value = reponse
+            self.assertEqual(spotify._nombre_titres("spotify:playlist:P9"), 1294)
+        self.assertTrue(api.get.call_args.args[0].endswith("/playlists/P9/items"))
+        with patch("tools.spotify._h", return_value={}), \
+                patch("tools.spotify.requests") as api:
+            api.get.return_value = SimpleNamespace(status_code=403, json=lambda: {})
+            self.assertIsNone(spotify._nombre_titres("spotify:playlist:P9"))
 
 
 if __name__ == "__main__":

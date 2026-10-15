@@ -68,8 +68,11 @@ playlist, indique son nom exact (elle doit exister sur ton compte) :
 ```yaml
 spotify:
   playlist_lancement: "Chill"
+  lancement_aleatoire: true    # départ sur un titre au hasard, puis mode aléatoire
 ```
 
+Par défaut (`true`), la playlist part d'un titre au hasard puis passe en mode
+aléatoire ; mets `false` pour l'écouter dans l'ordre, depuis le premier titre.
 Si la musique joue déjà dans la pièce, Jarvis n'y touche pas. Sans ce réglage,
 il reprend la dernière musique écoutée. Dans les deux cas, il vérifie que
 l'enceinte joue vraiment avant d'annoncer « je lance » : un récepteur librespot

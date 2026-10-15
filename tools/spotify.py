@@ -9,6 +9,7 @@ N1/N2 (écriture dans TA playlist). Non exposé au MCP par défaut. Voir docs/sp
 import base64
 import json
 import os
+import random
 import threading
 import time
 from pathlib import Path
@@ -215,6 +216,27 @@ def _jouer_corps(device_id, corps):
                         data=json.dumps(corps), timeout=15)
 
 
+def _activer_aleatoire(device_id):
+    """Active le mode aléatoire de Spotify sur un appareil Connect."""
+    return requests.put(f"{_API}/me/player/shuffle", headers=_h(),
+                        params={"state": "true", "device_id": device_id}, timeout=15)
+
+
+def _nombre_titres(uri_playlist):
+    """Nombre de titres d'une playlist, None si inconnu.
+
+    Spotify refuse désormais /playlists/{id}/tracks (403) : seul /items répond."""
+    pid = str(uri_playlist).rsplit(":", 1)[-1]
+    try:
+        r = requests.get(f"{_API}/playlists/{pid}/items", headers=_h(),
+                         params={"fields": "total", "limit": 1}, timeout=15)
+        if _requete_reussie(r):
+            return int((r.json() or {}).get("total") or 0) or None
+    except Exception:
+        pass
+    return None
+
+
 def _commande_lecture(device_id, action):
     """Pause, piste suivante ou précédente sur un appareil Spotify précis."""
     chemins = {
@@ -274,6 +296,34 @@ def _playlist_lancement():
         return None, ""
     pid = _playlist_id(nom, creer=False)
     return (f"spotify:playlist:{pid}" if pid else None), nom
+
+
+def _lancement_aleatoire():
+    """La playlist de lancement démarre-t-elle en aléatoire (spotify.lancement_aleatoire) ?"""
+    return bool(reglage("spotify.lancement_aleatoire", True))
+
+
+def _lancer_playlist(device_id, uri):
+    """Joue une playlist sur un appareil et vérifie que ça joue.
+
+    En aléatoire : départ sur un titre au hasard (sinon Spotify commence toujours
+    par le premier), puis mode aléatoire activé une fois l'enceinte active.
+    Renvoie (lecture démarrée, aléatoire activé)."""
+    aleatoire = _lancement_aleatoire()
+    corps = {"context_uri": uri}
+    if aleatoire:
+        total = _nombre_titres(uri)
+        if total:
+            corps["offset"] = {"position": random.randrange(total)}
+    if not (_requete_reussie(_jouer_corps(device_id, corps))
+            and _joue_sur(device_id, attente=6.0)):
+        return False, False
+    if not aleatoire:
+        return True, False
+    try:
+        return True, _requete_reussie(_activer_aleatoire(device_id))
+    except Exception:
+        return True, False
 
 
 def _corps_reprise(etat):
@@ -423,9 +473,10 @@ def lancer_spotify(piece: str = "") -> str:
             if uri:
                 # Playlist par défaut de l'utilisatrice : un contexte explicite, que
                 # l'enceinte sait toujours charger (contrairement à une simple bascule).
-                if (_requete_reussie(_jouer_corps(appareil["id"], {"context_uri": uri}))
-                        and _joue_sur(appareil["id"], attente=6.0)):
-                    return f"Je lance ta playlist {nom} sur {attendu}."
+                joue, aleatoire = _lancer_playlist(appareil["id"], uri)
+                if joue:
+                    mode = " en aléatoire" if aleatoire else ""
+                    return f"Je lance ta playlist {nom}{mode} sur {attendu}."
                 return f"Ta playlist {nom} n'a pas démarré sur {attendu}."
             if _demarrer_sur_appareil(appareil["id"], etat):
                 if nom:

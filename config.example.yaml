@@ -436,6 +436,7 @@ spotify:                       # ajouter les musiques reconnues a une playlist ;
   lancement_delai: 3.0         # attente si l'app doit devenir un lecteur Spotify actif
   appareils: {}                # ex. {cuisine: "Jarvis Cuisine"} pour Spotify Connect
   playlist_lancement: ""       # « lance Spotify » dans une piece : playlist jouee (vide = reprend la derniere musique)
+  lancement_aleatoire: true    # cette playlist demarre sur un titre au hasard, en mode aleatoire
   # Connexion une fois : python scripts/spotify_login.py (refresh_token dans logs/spotify/)
 
 cockpit:                       # tableau de bord perso (app web locale) ; docs/cockpit.md
