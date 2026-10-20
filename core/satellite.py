@@ -95,6 +95,35 @@ def _hors_maison(ws) -> bool:
         return True
 
 
+def _choix_tableau(valeur):
+    """satellites[].tableau : true (toutes les tuiles), liste d'ids, ou rien."""
+    if valeur is True:
+        return True
+    if isinstance(valeur, (list, tuple)):
+        ids = [str(v).strip().lower() for v in valeur if str(v).strip()]
+        return ids or False
+    return False
+
+
+def _tableau_autorise(ws, choix) -> bool:
+    """Tuiles du tableau de bord (donnees personnelles) pour ce poste ?
+
+    Seulement s'il les demande, et seulement sur un canal chiffre (wss://, listener
+    TLS du LAN) ou interne a la machine. Le tunnel ngrok est deja refuse par
+    _origine_locale_ou_lan, qui bloque aussi les en-tetes X-Forwarded-* : le schema
+    vu ici est donc bien celui de la connexion reelle."""
+    if not choix:
+        return False
+    if str((getattr(ws, "scope", None) or {}).get("scheme", "")) == "wss":
+        return True
+    client = getattr(ws, "client", None)
+    hote = str(getattr(client, "host", "") or "").split("%", 1)[0]
+    try:
+        return ipaddress.ip_address(hote).is_loopback
+    except ValueError:
+        return False
+
+
 def _satellites():
     """Dict id -> {piece, token, wake} depuis config.yaml (section satellites)."""
     out = {}
@@ -110,6 +139,9 @@ def _satellites():
                 # extinction) confirmables depuis ce satellite. Mettre false pour un
                 # micro de passage ; toujours refusees hors de la maison (Tailscale).
                 "actions_critiques": bool(s.get("actions_critiques", True)),
+                # Tuiles du tableau de bord envoyees a la fenetre Jarvis de ce poste
+                # (true ou liste d'ids) ; jamais sur une connexion en clair.
+                "tableau": _choix_tableau(s.get("tableau", False)),
             }
     return out
 
@@ -150,6 +182,8 @@ class _Session:
         self.relances_restantes = 0
         self.apres_reveil = False  # la prochaine phrase suit un « Hey Jarvis » (pas une relance)
         self.actions_critiques = False  # N3 permis ? fixe a l'authentification
+        self.tableau = False       # tuiles a envoyer (True ou ids), fixe a l'authentification
+        self.etat = ""             # dernier etat envoye au poste
 
     def nouveau_reveil(self, maximum):
         """Ouvre un nombre borné de fenêtres sans nouveau wake word."""
@@ -627,12 +661,30 @@ def monter_routes(app):
             await ws.send_text(json.dumps(obj, ensure_ascii=False))
 
         async def etat(e):
+            sess.etat = e
             await envoyer({"type": "etat", "etat": e})
             if e == "veille" and sess.satellite:
                 # Releve affiche par la fenetre Jarvis du poste (ignore par les Pi).
                 statut = await asyncio.to_thread(statut_affichage)
                 if statut:
                     await envoyer({"type": "statut", **statut})
+                await envoyer_tableau()
+
+        async def envoyer_tableau():
+            """Tuiles en cache (aucune lecture ici), seulement au repos : la fenetre
+            du poste ne les affiche qu'en veille, et rien ne s'intercale dans l'audio."""
+            if not sess.tableau or sess.etat != "veille":
+                return
+            from core import tableau_de_bord
+            tuiles = tableau_de_bord.filtrer(tableau_de_bord.tuiles(), sess.tableau)
+            if tuiles:
+                await envoyer({"type": "tableau", "tuiles": tuiles})
+
+        boucle_ws = asyncio.get_running_loop()
+
+        def tableau_change(_tuiles):
+            # Appele depuis la boucle de fond du tableau de bord (autre thread).
+            asyncio.run_coroutine_threadsafe(envoyer_tableau(), boucle_ws)
 
         async def envoyer_audio(texte, court=False):
             synthese = _tts_pcm_court if court else _tts_pcm
@@ -711,6 +763,13 @@ def monter_routes(app):
                     # de la maison -> aucune action critique, quel que soit le reglage.
                     sess.actions_critiques = (conf.get("actions_critiques", True)
                                               and not _hors_maison(ws))
+                    if _tableau_autorise(ws, conf.get("tableau")):
+                        from core import tableau_de_bord
+                        if tableau_de_bord.demarrer(tableau_change):
+                            sess.tableau = conf.get("tableau")
+                    elif conf.get("tableau"):
+                        LOG.warning("satellite %s : tableau de bord non envoye sur une "
+                                    "connexion en clair (passe en wss://)", sid)
                     LOG.info("satellite connecté : %s (pièce %s)", sid, sess.piece or "?")
                     await envoyer({"type": "pret", "piece": sess.piece})
                     await etat("veille")
@@ -853,6 +912,9 @@ def monter_routes(app):
         except Exception:
             LOG.exception("satellite: boucle WS")
         finally:
+            if sess.tableau:
+                from core import tableau_de_bord
+                tableau_de_bord.desabonner(tableau_change)
             LOG.info("satellite déconnecté : %s", sess.satellite)
 
     LOG.info("satellite: route /satellite montée (LAN, token par satellite)")

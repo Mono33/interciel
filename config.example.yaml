@@ -297,6 +297,10 @@ hud:                            # interface visuelle locale (http://127.0.0.1:87
   fenetre: "app"                # app = fenetre dediee Edge/Chrome sans onglets ; navigateur = onglet classique
   ecran: null                   # ecran ou l'afficher : haut, bas, gauche, droite (par rapport au principal, robuste si un ecran est eteint) ou numero (0 = principal, puis de gauche a droite, comme l'overlay) ; null = libre. Au « Hey Jarvis », la fenetre y revient si Windows l'a deplacee
   premier_plan_au_reveil: true  # « Hey Jarvis » fait passer la fenetre du HUD devant (sans prendre le clavier ni couvrir un plein ecran)
+  tableau_de_bord:              # tuiles facon Echo Show au repos, lecture seule (voir docs/tableau_de_bord.md)
+    actif: false                # true = au repos, le reacteur se range dans un coin et les tuiles s'affichent
+    sources: [agenda, factures, loopstr, instagram, discord]  # ordre d'affichage ; facultatives : colis, meteo, spotify
+    factures_minutes: 60        # facture.net est lu dans « Chrome + Jarvis » deja ouvert, au plus toutes les N minutes (15 min minimum)
 
 signal_matin:                   # quotidien personnel A4 ; voir docs/signal_matin.md
   actif: false                  # activer seulement apres validation de la preview et de l'impression
@@ -495,6 +499,9 @@ satellites:                    # Jarvis dans d'autres pieces (Raspberry Pi, futu
   #   brief_au_demarrage: false # true seulement pour le poste principal ; une fois par jour côté serveur
   #   actions_critiques: true  # false : aucun mail/appel/reservation/suppression/extinction depuis ce micro
   #                            # (toujours refuses si le satellite arrive par Tailscale, donc de loin)
+  #   tableau: false           # poste avec fenetre Jarvis : tuiles du tableau de bord a lui envoyer (true ou
+  #                            # liste d'ids, ex. [agenda, loopstr, instagram, discord]) ; uniquement en wss://
+  #                            # (jamais en clair) et si hud.tableau_de_bord.actif ici (docs/tableau_de_bord.md)
 
 # Poste Windows qui porte les applis, le navigateur, les touches media et le son.
 # L'agent initie une connexion sortante et n'accepte jamais de commande shell.

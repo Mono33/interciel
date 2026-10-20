@@ -303,6 +303,9 @@ def brancher_affichage(audio, reglages, hud_module=None):
             activite = valeur.get("hermes")
             if isinstance(activite, dict):
                 hud_module.hermes(activite.get("taches", 0), activite.get("tokens"))
+        elif nom == "tableau" and isinstance(valeur, dict):
+            # Tuiles lues sur le serveur, fusionnees par id avec celles de ce PC.
+            hud_module.tableau(valeur.get("tuiles", []))
 
     audio["_evenement_callback"] = evenement
     return hud_module

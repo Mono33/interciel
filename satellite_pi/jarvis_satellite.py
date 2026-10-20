@@ -610,9 +610,11 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
                     micro.fermer_relance()
                     occupe.clear()
                     _evenement("etat", "veille")
+                    print("  [conversation] veille forcée — dites « Hey Jarvis » pour me réveiller")
                 elif t == "statut":
                     _evenement("statut", d)
-                    print("  [conversation] veille forcée — dites « Hey Jarvis » pour me réveiller")
+                elif t == "tableau":
+                    _evenement("tableau", d)
                 elif t == "erreur":
                     print("  [erreur]", d.get("message"))
         finally:

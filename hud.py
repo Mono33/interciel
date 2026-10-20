@@ -70,11 +70,17 @@ _ETAT = {
     "budget": None,
     "hermes": None,
     "micro": False,
+    "tableau": [],
 }
 
 # Une file par onglet connecte. Le verrou protege l'ensemble.
 _CLIENTS = set()
 _VERROU = threading.Lock()
+
+# Tuiles du tableau de bord par id, dans leur ordre d'arrivee.
+_TABLEAU = {}
+_VERROU_TABLEAU = threading.Lock()
+_MAX_TUILES = 12
 
 # Dernieres lignes de transcription, rejouees a la reconnexion d'un client.
 _HISTORIQUE = deque(maxlen=40)
@@ -173,6 +179,39 @@ def micro(muet):
 def demo(actif):
     """Affiche un badge DEMO (scenario de demonstration, rien de reel)."""
     _diffuser({"t": "demo", "v": bool(actif)})
+
+
+def tableau(tuiles):
+    """Tuiles du tableau de bord, affichees par la page au repos (etat veille).
+
+    tuiles : liste de dicts portant chacun un "id" (voir core/tableau_de_bord.py).
+    Elles sont fusionnees par id avec celles deja recues, si bien que plusieurs
+    emetteurs (le poste local, plus tard le serveur) peuvent publier les leurs."""
+    if not isinstance(tuiles, (list, tuple)):
+        return
+    with _VERROU_TABLEAU:
+        for tuile in tuiles:
+            if not isinstance(tuile, dict) or not str(tuile.get("id", "")).strip():
+                continue
+            cle = str(tuile["id"]).strip()
+            if cle in _TABLEAU or len(_TABLEAU) < _MAX_TUILES:
+                _TABLEAU[cle] = dict(tuile)
+        _ETAT["tableau"] = list(_TABLEAU.values())
+        instantane = list(_ETAT["tableau"])
+    _diffuser({"t": "tableau", "tuiles": instantane})
+
+
+def _demarrer_tableau():
+    """Tableau de bord local (hud.tableau_de_bord.actif) : tuiles lues en fond.
+
+    Lit la configuration du processus courant ; sans elle, ou si une dependance
+    manque, la fenetre reste un reacteur classique."""
+    try:
+        from core import tableau_de_bord
+        return tableau_de_bord.demarrer(tableau)
+    except Exception as e:
+        print(f"[hud] tableau de bord indisponible : {type(e).__name__}")
+        return False
 
 
 # ------------------------------------------------------ controles rapides HUD
@@ -446,6 +485,8 @@ class _Poignee(BaseHTTPRequestHandler):
                 self._pousser({"t": "hermes", "taches": h["taches"],
                                "tokens": h["tokens"]})
             self._pousser({"t": "micro", "v": _ETAT.get("micro", False)})
+            if _ETAT.get("tableau"):
+                self._pousser({"t": "tableau", "tuiles": list(_ETAT["tableau"])})
             for evenement in list(_HISTORIQUE):
                 self._pousser(evenement)
 
@@ -483,7 +524,7 @@ class _Serveur(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def demarrer(ouvrir=True, fenetre="navigateur", ecran=None):
+def demarrer(ouvrir=True, fenetre="navigateur", ecran=None, tableau_local=True):
     """Lance le serveur dans un thread daemon et ouvre l'affichage.
 
     fenetre="app" ouvre une fenetre dediee (Edge ou Chrome en mode application,
@@ -491,8 +532,9 @@ def demarrer(ouvrir=True, fenetre="navigateur", ecran=None):
     "navigateur" ouvre un onglet classique. ecran (mode app) : ecran ou placer la
     fenetre, soit un index (0 = principal puis de gauche a droite, comme l'overlay),
     soit une position ("haut", "bas", "gauche", "droite"), qui reste juste meme si
-    un autre ecran est eteint. Sans effet si le serveur tourne deja. Renvoie
-    l'instance du serveur.
+    un autre ecran est eteint. tableau_local : lance aussi le tableau de bord si
+    hud.tableau_de_bord.actif le demande. Sans effet si le serveur tourne deja.
+    Renvoie l'instance du serveur.
     """
     global _SERVEUR, _MODE_FENETRE, _ECRAN
     if _SERVEUR is not None:
@@ -507,6 +549,8 @@ def demarrer(ouvrir=True, fenetre="navigateur", ecran=None):
     thread.start()
 
     print(f"HUD sur http://127.0.0.1:{PORT}/")
+    if tableau_local:
+        _demarrer_tableau()
     if ouvrir:
         ouvrir_fenetre()
     return _SERVEUR
@@ -775,6 +819,35 @@ def mettre_au_premier_plan():
 # ---------------------------------------------------------------- demonstration
 
 
+# Tuiles factices du scenario : aucune donnee reelle.
+_TUILES_DEMO = [
+    {"id": "agenda", "titre": "Agenda", "etat": "ok", "maj": "09:30", "valeur": "2",
+     "legende": "aujourd'hui", "message": "", "lignes": [
+         {"texte": "Point equipe", "detail": "aujourd'hui · 14h", "alerte": True},
+         {"texte": "Tournage studio", "detail": "aujourd'hui · 17h30", "alerte": True},
+         {"texte": "Dentiste", "detail": "jeu. 23 · 9h", "alerte": False}]},
+    {"id": "factures", "titre": "Factures", "etat": "ok", "maj": "09:00",
+     "valeur": "1 250 €", "legende": "à encaisser", "message": "", "lignes": [
+         {"texte": "1 facture en retard", "detail": "400 €", "alerte": True},
+         {"texte": "3 factures impayées", "detail": "1 250 €", "alerte": False}]},
+    {"id": "loopstr", "titre": "Loopstr", "etat": "ok", "maj": "09:15", "valeur": "2",
+     "legende": "sur 7 jours", "message": "", "lignes": [
+         {"texte": "Marque A - publication", "detail": "demain", "alerte": True},
+         {"texte": "Marque B - brief", "detail": "ven. 24", "alerte": False}]},
+    {"id": "instagram", "titre": "Instagram", "etat": "ok", "maj": "09:00",
+     "valeur": "+18", "legende": "abonnés", "message": "", "lignes": [
+         {"texte": "@compte_demo", "detail": "4210 abonnés · +18 depuis hier",
+          "alerte": False}]},
+    {"id": "discord", "titre": "Discord", "etat": "ok", "maj": "09:20", "valeur": "1",
+     "legende": "mention(s) 24 h", "message": "", "lignes": [
+         {"texte": "42 messages", "detail": "3 salon(s) actifs", "alerte": False},
+         {"texte": "#general", "detail": "30 msg · Serveur demo", "alerte": False}]},
+    {"id": "meteo", "titre": "Météo", "etat": "indisponible", "maj": "09:00",
+     "valeur": "", "legende": "", "lignes": [],
+     "message": "Indisponible pour le moment."},
+]
+
+
 def _scenario():
     """Joue une conversation type en boucle pour tester le rendu."""
     import math
@@ -784,6 +857,7 @@ def _scenario():
     routage("hybride")
     budget(0.27, 3.0, 0.09)
     hermes(0, 48213)
+    tableau(_TUILES_DEMO)
 
     tours = [
         ("allume la lumiere de la chambre",
@@ -803,9 +877,9 @@ def _scenario():
     pas = 0
     while True:
         for question, nom_outil, detail, reponse in tours:
-            # Veille : le fond respire doucement.
+            # Veille : le fond respire doucement et le tableau de bord s'affiche.
             etat(VEILLE)
-            for _ in range(24):
+            for _ in range(140):
                 pas += 1
                 niveau(0.04 + 0.03 * (0.5 + 0.5 * math.sin(pas * 0.15)))
                 time.sleep(0.05)
@@ -839,7 +913,7 @@ def _scenario():
 
 
 if __name__ == "__main__":
-    demarrer()
+    demarrer(tableau_local=False)              # demo : tuiles factices uniquement
     print("Scenario de demonstration en boucle. Ctrl+C pour quitter.")
     try:
         _scenario()
