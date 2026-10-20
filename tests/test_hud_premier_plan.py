@@ -103,6 +103,54 @@ class FenetreTest(unittest.TestCase):
         finally:
             hud._SERVEUR, hud._ECRAN = ancien_serveur, ancien_ecran
 
+    def test_ecran_nomme_par_sa_position(self):
+        self.assertEqual(hud.ecran_demande(" Haut "), "haut")
+        self.assertEqual(hud.ecran_demande("dessus"), "haut")
+        self.assertEqual(hud.ecran_demande("2"), 2)
+        self.assertIsNone(hud.ecran_demande("n'importe ou"))
+        self.assertIsNone(hud.ecran_demande(None))
+
+    def test_ecran_du_dessus_trouve_meme_si_un_autre_est_eteint(self):
+        principal, gauche, dessus = ((0, 0, 3440, 1400), (-1080, 0, 0, 1880),
+                                     (875, -1080, 2795, -40))
+        zones = [principal, gauche, dessus]
+        self.assertEqual(hud.index_ecran("haut", zones), 2)
+        self.assertEqual(hud.index_ecran("gauche", zones), 1)
+        self.assertEqual(hud.index_ecran("principal", zones), 0)
+        self.assertIsNone(hud.index_ecran("droite", zones))
+        self.assertIsNone(hud.index_ecran(5, zones))
+        # Ecran de gauche en veille : la numerotation change, pas la position.
+        self.assertEqual(hud.index_ecran("haut", [principal, dessus]), 1)
+        self.assertIsNone(hud.index_ecran(2, [principal, dessus]))
+
+    def _reveil(self, cadre):
+        zones = [(0, 0, 3440, 1400), (-1080, 0, 0, 1880), (875, -1080, 2795, -40)]
+        user32 = MagicMock()
+        user32.IsIconic.return_value = False
+        ancien = hud._ECRAN
+        hud._ECRAN = "haut"
+        try:
+            with patch.object(hud.sys, "platform", "win32"), \
+                    patch.object(hud, "trouver_fenetres", return_value=[1234]), \
+                    patch.object(hud, "_user32", return_value=user32), \
+                    patch.object(hud, "_plein_ecran_au_premier_plan", return_value=False), \
+                    patch.object(hud, "zones_ecrans", return_value=zones), \
+                    patch.object(hud, "cadre_fenetre", return_value=cadre), \
+                    patch.object(hud, "placer_sur_ecran", return_value=True) as placer:
+                self.assertTrue(hud.mettre_au_premier_plan())
+        finally:
+            hud._ECRAN = ancien
+        return placer
+
+    def test_reveil_ramene_la_fenetre_sur_l_ecran_choisi(self):
+        # Windows l'a renvoyee sur le principal (ecran du dessus en veille).
+        placer = self._reveil(cadre=(100, 100, 1500, 900))
+        placer.assert_called_once_with(1234, 2)
+
+    def test_reveil_ne_redimensionne_pas_une_fenetre_deja_en_place(self):
+        placer = self._reveil(cadre=(1000, -1000, 2000, -200))
+        placer.assert_not_called()
+
     @unittest.skipUnless(sys.platform == "win32", "API des fenetres Windows")
     def test_recherche_reelle_en_lecture_seule(self):
         self.assertEqual(hud.trouver_fenetres("titre-improbable-signal-xyz-0001"), [])

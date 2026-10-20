@@ -44,8 +44,12 @@ TITRE_FENETRE = "JARVIS · Reacteur arc"
 _DELAI_REOUVERTURE = 60.0
 _MODE_FENETRE = "navigateur"
 _DERNIERE_OUVERTURE = 0.0
-# Ecran ou ouvrir la fenetre (meme numerotation que l'overlay) ; None = laisser faire.
+# Ecran ou ouvrir la fenetre : numero (meme numerotation que l'overlay) ou position
+# par rapport a l'ecran principal ("haut", "bas", "gauche", "droite") ; None = libre.
 _ECRAN = None
+_POSITIONS_ECRAN = {"principal": "principal", "haut": "haut", "dessus": "haut",
+                    "bas": "bas", "dessous": "bas", "gauche": "gauche",
+                    "droite": "droite"}
 
 # Etats possibles, envoyes tels quels a la page.
 VEILLE = "veille"
@@ -484,18 +488,17 @@ def demarrer(ouvrir=True, fenetre="navigateur", ecran=None):
 
     fenetre="app" ouvre une fenetre dediee (Edge ou Chrome en mode application,
     sans onglets), que mettre_au_premier_plan() retrouve a coup sur ;
-    "navigateur" ouvre un onglet classique. ecran (mode app) : index de l'ecran
-    ou placer la fenetre, 0 = principal puis de gauche a droite, comme l'overlay.
-    Sans effet si le serveur tourne deja. Renvoie l'instance du serveur.
+    "navigateur" ouvre un onglet classique. ecran (mode app) : ecran ou placer la
+    fenetre, soit un index (0 = principal puis de gauche a droite, comme l'overlay),
+    soit une position ("haut", "bas", "gauche", "droite"), qui reste juste meme si
+    un autre ecran est eteint. Sans effet si le serveur tourne deja. Renvoie
+    l'instance du serveur.
     """
     global _SERVEUR, _MODE_FENETRE, _ECRAN
     if _SERVEUR is not None:
         return _SERVEUR
     _MODE_FENETRE = "app" if str(fenetre).lower() == "app" else "navigateur"
-    try:
-        _ECRAN = int(ecran) if ecran is not None and str(ecran).strip() != "" else None
-    except (TypeError, ValueError):
-        _ECRAN = None
+    _ECRAN = ecran_demande(ecran)
 
     _SERVEUR = _Serveur(("127.0.0.1", PORT), _Poignee)
     _SERVEUR.daemon_threads = True
@@ -625,10 +628,43 @@ def zones_ecrans():
     return [zone for _, zone in ecrans]
 
 
-def placer_sur_ecran(hwnd, index):
+def ecran_demande(valeur):
+    """Reglage hud.ecran normalise : index entier, position connue, ou None (libre)."""
+    if valeur is None:
+        return None
+    texte = str(valeur).strip().lower()
+    try:
+        return int(texte)
+    except ValueError:
+        return _POSITIONS_ECRAN.get(texte)
+
+
+def index_ecran(cible, zones):
+    """Index dans `zones` (zones_ecrans) de l'ecran voulu, None s'il n'existe pas.
+
+    cible : un index, ou une position par rapport a l'ecran principal (zones[0]) ;
+    s'il y a plusieurs candidats, le plus proche du principal l'emporte."""
+    if isinstance(cible, int):
+        return cible if 0 <= cible < len(zones) else None
+    if not zones or cible not in _POSITIONS_ECRAN.values():
+        return None
+    if cible == "principal":
+        return 0
+    g0, h0, d0, b0 = zones[0]
+    candidats = []
+    for index, (g, h, d, b) in enumerate(zones[1:], start=1):
+        x, y = (g + d) / 2, (h + b) / 2
+        ecart = {"haut": h0 - y, "bas": y - b0, "gauche": g0 - x, "droite": x - d0}[cible]
+        if ecart > 0:
+            candidats.append((ecart, index))
+    return min(candidats)[1] if candidats else None
+
+
+def placer_sur_ecran(hwnd, cible):
     """Place la fenetre sur toute la zone utile de l'ecran demande, sans l'activer."""
     zones = zones_ecrans()
-    if not 0 <= index < len(zones):
+    index = index_ecran(cible, zones)
+    if index is None:
         return False
     gauche, haut, droite, bas = zones[index]
     user32 = _user32()
@@ -651,6 +687,33 @@ def _placer_apres_ouverture(delai_max=15.0):
         time.sleep(attente)
         for hwnd in trouver_fenetres():
             placer_sur_ecran(hwnd, _ECRAN)
+
+
+def cadre_fenetre(hwnd):
+    """(gauche, haut, droite, bas) de la fenetre, None si inconnu. Lecture seule."""
+    import ctypes
+    from ctypes import wintypes
+    cadre = wintypes.RECT()
+    if not _user32().GetWindowRect(hwnd, ctypes.byref(cadre)):
+        return None
+    return cadre.left, cadre.top, cadre.right, cadre.bottom
+
+
+def _replacer_si_deplacee(hwnd):
+    """Ramene la fenetre sur l'ecran choisi si son centre n'y est plus.
+
+    Windows deplace les fenetres d'un ecran mis en veille ou debranche vers le
+    principal. Une fenetre deja sur le bon ecran garde la taille choisie."""
+    zones = zones_ecrans()
+    index = index_ecran(_ECRAN, zones)
+    cadre = cadre_fenetre(hwnd)
+    if index is None or cadre is None:
+        return False
+    x, y = (cadre[0] + cadre[2]) // 2, (cadre[1] + cadre[3]) // 2
+    gauche, haut, droite, bas = zones[index]
+    if gauche <= x < droite and haut <= y < bas:
+        return False
+    return placer_sur_ecran(hwnd, index)
 
 
 def _plein_ecran_au_premier_plan(user32):
@@ -684,7 +747,8 @@ def mettre_au_premier_plan():
 
     Sert d'accuse visuel au mot d'activation. Ne s'affiche jamais par-dessus une
     application en plein ecran ; une fenetre fermee est rouverte (mode app, une
-    fois par minute au plus). Renvoie True si une fenetre a ete mise devant.
+    fois par minute au plus) et une fenetre sortie de l'ecran choisi y revient.
+    Renvoie True si une fenetre a ete mise devant.
     """
     if sys.platform != "win32":
         return False
@@ -701,6 +765,8 @@ def mettre_au_premier_plan():
     for hwnd in fenetres:
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, 4)                   # SW_SHOWNOACTIVATE : restaure sans activer
+        if _ECRAN is not None:
+            _replacer_si_deplacee(hwnd)
         user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, sans_activer)   # au-dessus de tout...
         user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, sans_activer)   # ...sans rester epinglee
     return True
