@@ -464,6 +464,31 @@ class HudPageBasculeTests(unittest.TestCase):
         self.assertTrue(self._mode())
         self.assertEqual(bouton.get_attribute("aria-pressed"), "true")
 
+    def test_le_bouton_affiche_le_tableau_meme_hors_repos(self):
+        # Cas reel : « Hey Jarvis » sans question laissait la fenetre en ecoute.
+        hud.etat("ecoute")
+        self._attendre_mode(False, delai=2000)
+        bouton = self.page.locator("#basculerTableau")
+        bouton.click()
+        self.assertTrue(self._mode())                       # tout de suite
+        self.assertEqual(bouton.get_attribute("aria-pressed"), "true")
+        hud.etat("parole")                                  # elle reparle
+        self._attendre_mode(False, delai=2000)
+        hud.etat("veille")
+        self._attendre_mode(True)                           # et il revient au repos
+
+    def test_masque_au_repos_jusqu_au_prochain_clic(self):
+        self._attendre_mode(True)
+        bouton = self.page.locator("#basculerTableau")
+        bouton.click()
+        self.assertFalse(self._mode())
+        hud.etat("ecoute")
+        hud.etat("veille")
+        self.page.wait_for_timeout(2500)
+        self.assertFalse(self._mode())                      # le choix est retenu
+        bouton.click()
+        self.assertTrue(self._mode())
+
     def test_tuiles_rendues_comme_du_texte(self):
         self._attendre_mode(True)
         self.assertEqual(self.page.locator("#tableau img").count(), 0)

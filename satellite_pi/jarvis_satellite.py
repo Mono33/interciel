@@ -455,6 +455,10 @@ class Micro:
                 flux, self.attente_parole,
                 "  [micro] aucune question après le wake word")
             if not pcm:
+                # Personne n'a parlé : retour au repos ici et côté serveur, sinon la
+                # fenêtre Jarvis du poste resterait en écoute (tableau de bord masqué).
+                _evenement("etat", "veille")
+                self.file.put({"type": "reveil_sans_suite"})
                 continue
             self.occupe.set()
             self.file.put(pcm)

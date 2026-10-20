@@ -17,8 +17,12 @@ Tout se passe dans la **même fenêtre** que le réacteur (`hud.html`, servie su
 
 - Les 2 s de veille continue évitent que le tableau clignote entre deux phrases
   d'une même réponse.
-- Le bouton **▦ Tableau de bord**, à côté de **⚙ Config**, masque ou réaffiche le
-  tableau. Le choix est retenu par la fenêtre (stockage local du navigateur).
+- Le bouton **▦ Tableau de bord**, à côté de **⚙ Config**, agit tout de suite,
+  quel que soit l'état de Jarvis : il affiche le tableau (Jarvis revient en grand
+  dès que tu lui reparles, puis le tableau revient au repos) ou le masque (il ne
+  revient plus au repos jusqu'au prochain clic). Ce choix est retenu par la
+  fenêtre (stockage local du navigateur).
+- Un « Hey Jarvis » sans question remet la fenêtre au repos, et donc le tableau.
 - Le bouton n'apparaît que lorsque des tuiles existent : sans réglage, la fenêtre
   reste exactement comme avant.
 

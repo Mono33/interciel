@@ -911,6 +911,12 @@ def monter_routes(app):
                         await proposer_relance()
                         await etat("veille")
 
+                elif typ == "reveil_sans_suite" and sess.satellite:
+                    # « Hey Jarvis » sans question : le poste revient au repos (relevé
+                    # et tuiles du tableau de bord compris).
+                    sess.mettre_en_veille()
+                    await etat("veille")
+
                 elif typ == "ping":
                     await envoyer({"type": "pong"})
 

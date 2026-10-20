@@ -165,6 +165,20 @@ class SessionServeurTests(unittest.TestCase):
             suivant = json.loads(ws.receive_text())
         self.assertEqual(suivant["type"], "pong")                # rien ne s'est intercale
 
+    def test_hey_jarvis_sans_question_rend_le_repos(self):
+        connexion, demarrer = self._session("wss://testserver/satellite")
+        reglages = {"satellite_lan.accuse_reveil_vocal": False}
+        with patch.object(serveur, "reglage", lambda cle, defaut=None: reglages.get(cle, defaut)), \
+                patch("core.arbitrage_micro.reserver_reveil", return_value=True), connexion as ws:
+            self._bonjour(ws)
+            ws.receive_text()                                    # tuiles initiales
+            ws.send_text(json.dumps({"type": "reveil", "score": 1.0, "id": "r1"}))
+            ws.receive_text()                                    # reveil_accepte
+            ws.send_text(json.dumps({"type": "reveil_sans_suite"}))
+            suite = [json.loads(ws.receive_text()) for _ in range(2)]
+        self.assertEqual(suite[0], {"type": "etat", "etat": "veille"})
+        self.assertEqual(suite[1]["type"], "tableau")            # les tuiles repartent
+
     def test_rien_sur_une_connexion_en_clair(self):
         connexion, demarrer = self._session("ws://testserver/satellite")
         with connexion as ws:
@@ -190,6 +204,9 @@ class RelaisPosteTests(unittest.TestCase):
                       source)
         # Le message « veille forcee » accompagne veille_forcee, pas chaque releve.
         self.assertIn('_evenement("statut", d)\n                elif', source)
+        # « Hey Jarvis » sans question : repos local et prevenir le serveur.
+        self.assertIn('_evenement("etat", "veille")\n'
+                      '                self.file.put({"type": "reveil_sans_suite"})', source)
 
     def test_l_agent_transmet_les_tuiles_au_hud(self):
         agent = _charger("jarvis_desktop_agent_tableau", "desktop_agent/jarvis_desktop_agent.py")

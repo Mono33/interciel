@@ -376,7 +376,7 @@
 
   <div class="barre-boutons">
     <button class="controle-bouton" id="basculerTableau" type="button" hidden
-      aria-controls="tableau" aria-pressed="true"
+      aria-controls="tableau" aria-pressed="false"
       title="Afficher ou masquer le tableau de bord au repos">▦ Tableau de bord</button>
     <button class="controle-bouton" id="ouvrirControle" type="button"
       aria-controls="controleTiroir" aria-expanded="false">⚙ Config</button>
@@ -629,13 +629,16 @@ function ecrireMasque(v) {
   try { localStorage.setItem(CLE_MASQUE, v ? "1" : "0"); } catch (e) {}
 }
 
-const TB = { tuiles: [], masque: lireMasque(), visible: false, minuteur: 0 };
+// masque : choix retenu de ne plus l'afficher au repos. force : demande du bouton,
+// valable jusqu'au prochain echange avec Jarvis (ecoute, reflexion, parole).
+const TB = { tuiles: [], masque: lireMasque(), force: false, visible: false, minuteur: 0 };
 
 function tableauVoulu() {
-  return TB.tuiles.length > 0 && !TB.masque && ETATS_REPOS.has(S.etat);
+  return TB.tuiles.length > 0 && (TB.force || (!TB.masque && ETATS_REPOS.has(S.etat)));
 }
 
 function appliquerModeTableau(actif) {
+  $("basculerTableau").setAttribute("aria-pressed", String(actif));
   if (TB.visible === actif) return;
   TB.visible = actif;
   document.body.classList.toggle("mode-tableau", actif);
@@ -653,13 +656,15 @@ function majModeTableau(immediat = false) {
   } else {
     TB.minuteur = setTimeout(() => appliquerModeTableau(tableauVoulu()), DELAI_TABLEAU);
   }
-  const bouton = $("basculerTableau");
-  bouton.hidden = TB.tuiles.length === 0;
-  bouton.setAttribute("aria-pressed", String(!TB.masque));
+  $("basculerTableau").hidden = TB.tuiles.length === 0;
 }
 
+// Le bouton agit tout de suite, quel que soit l'etat : il affiche le tableau (et
+// le reaffichera au repos) ou le masque (et ne l'affichera plus au repos).
 function basculerTableau() {
-  TB.masque = !TB.masque;
+  const afficher = !TB.visible;
+  TB.force = afficher;
+  TB.masque = !afficher;
   ecrireMasque(TB.masque);
   majModeTableau(true);
 }
@@ -951,6 +956,7 @@ function appliquer(ev) {
   switch (ev.t) {
     case "etat":
       S.etat = ev.v;
+      if (!ETATS_REPOS.has(ev.v)) TB.force = false;   // elle parle : Jarvis en grand
       majReleve();
       majModeTableau();
       break;
