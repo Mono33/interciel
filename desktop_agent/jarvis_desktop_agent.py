@@ -354,18 +354,28 @@ def demarrer_audio(conf, actions):
     actions.lier_audio(satellite, micro)
     threading.Thread(target=micro.run, name="jarvis-micro", daemon=True).start()
 
+    url_audio = str(audio.get("pc_url", ""))
+    tls_audio = satellite.contexte_tls(
+        url_audio, audio.get("certificat") or conf.get("certificat"), base=RACINE)
+
     def boucle_audio():
         asyncio.run(satellite._boucle(
-            str(audio.get("pc_url", "")), str(audio.get("satellite_id", "")),
-            str(audio.get("token", "")), file_audio, occupe, micro))
+            url_audio, str(audio.get("satellite_id", "")),
+            str(audio.get("token", "")), file_audio, occupe, micro, tls=tls_audio))
 
     threading.Thread(target=boucle_audio, name="jarvis-audio", daemon=True).start()
 
 
 async def session(conf, actions):
     import websockets
+    from satellite_pi.jarvis_satellite import contexte_tls
     url = str(conf.get("serveur_url", "") or "").strip()
-    async with websockets.connect(url, max_size=131_072) as ws:
+    # En wss://, seul le serveur qui detient la cle du certificat epingle est
+    # accepte : un appareil du reseau ne peut pas se faire passer pour lui et
+    # envoyer des commandes a ce PC.
+    tls = contexte_tls(url, conf.get("certificat"), base=RACINE)
+    options = {"ssl": tls} if tls is not None else {}
+    async with websockets.connect(url, max_size=131_072, **options) as ws:
         await ws.send(json.dumps({
             "type": "hello", "agent": str(conf.get("agent_id", "bureau")),
             "token": str(conf.get("token", "")),

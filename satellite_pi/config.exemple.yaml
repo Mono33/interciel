@@ -1,5 +1,7 @@
 # Config générique — copier en config.yaml puis renseigner les valeurs locales.
-pc_url: ""                      # ex. ws://<ADRESSE_LAN_DU_PC>:8791/satellite
+pc_url: ""                      # ex. wss://<ADRESSE_LAN_DU_PC>:8792/satellite (chiffre)
+certificat: "jarvis-lan.crt"    # copie du certificat public du serveur (certs/jarvis-lan.crt)
+                                # ; seul ws://...:8791 (en clair) s'en passe, a eviter
 satellite_id: ""                # doit exister côté PC (config.yaml -> satellites[].id)
 token: ""                      # le meme token que cote PC pour ce satellite
 # Peripheriques audio (indices : `python -c "import sounddevice as sd; print(sd.query_devices())"`)

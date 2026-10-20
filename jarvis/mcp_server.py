@@ -95,20 +95,52 @@ for _o in registre.exposes_mcp():
     _enregistrer(_o)
 
 
+class _ExigerJeton:
+    """Enveloppe ASGI : refuse toute requete HTTP sans « Authorization: Bearer <jeton> »."""
+
+    def __init__(self, app, jeton):
+        self.app = app
+        self.attendu = f"Bearer {jeton}".encode()
+
+    async def __call__(self, scope, receive, send):
+        import secrets
+        if scope.get("type") == "http":
+            fourni = dict(scope.get("headers") or []).get(b"authorization", b"")
+            if not secrets.compare_digest(fourni, self.attendu):
+                LOG.warning("requete MCP refusee : jeton absent ou invalide")
+                await send({"type": "http.response.start", "status": 401,
+                            "headers": [(b"content-type", b"text/plain")]})
+                await send({"type": "http.response.body", "body": b"jeton MCP requis"})
+                return
+        await self.app(scope, receive, send)
+
+
+def _jeton_mcp():
+    import os
+    return str(os.environ.get("JARVIS_MCP_TOKEN") or reglage("mcp.token", "") or "").strip()
+
+
 def _lancer_http(kind):
     host = reglage("mcp.host", "127.0.0.1")
     port = int(reglage("mcp.port", 8765))
-    if host not in ("127.0.0.1", "::1", "localhost"):
-        # Le transport HTTP n'a PAS d'authentification : hors loopback, n'importe
-        # quelle machine du réseau pourrait appeler les outils exposés (domotique,
-        # OBS...). À ne faire que sur un réseau de confiance, en connaissance de cause.
-        print(f"[MCP] ATTENTION : écoute sur {host} (hors loopback) SANS auth — "
-              f"exposé au réseau. Repasse mcp.host à 127.0.0.1 si non voulu.")
-    print(f"Serveur MCP {kind} sur http://{host}:{port}")
-    try:
-        server.run(kind, host=host, port=port)
-    except TypeError:
-        server.run(kind)
+    jeton = _jeton_mcp()
+    if host not in ("127.0.0.1", "::1", "localhost") and not jeton:
+        # Hors loopback, la protection anti DNS rebinding du SDK est coupee et
+        # n'importe quelle machine du reseau pourrait appeler les outils : refus.
+        raise SystemExit(f"[MCP] refus d'ecouter sur {host} sans jeton : renseigne "
+                         "mcp.token (ou JARVIS_MCP_TOKEN), ou garde mcp.host: 127.0.0.1.")
+    print(f"Serveur MCP {kind} sur http://{host}:{port}"
+          + (" (jeton exige)" if jeton else ""))
+    if not jeton:
+        try:
+            server.run(kind, host=host, port=port)
+        except TypeError:
+            server.run(kind)
+        return
+    import uvicorn
+    app = (server.sse_app(host=host) if kind == "sse"
+           else server.streamable_http_app(host=host))
+    uvicorn.run(_ExigerJeton(app, jeton), host=host, port=port, log_level="warning")
 
 
 def main():

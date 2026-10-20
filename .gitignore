@@ -32,6 +32,10 @@ google_token.json*
 notes/
 reminders.json
 satellite_pi/config.yaml
+# Certificat et cle TLS du listener LAN (la cle ne quitte jamais le serveur)
+certs/
+desktop_agent/*.crt
+satellite_pi/*.crt
 # Filets de securite si un dossier de session est deplace hors de logs/
 # (alexa.dossier, spotify.dossier, instagram.dossier...).
 *.cookies
@@ -77,3 +81,6 @@ musique/captures/
 # Cockpit : donnees financieres PERSO (tout le dossier sauf l'exemple versionne).
 finances/*
 !finances/abonnements.example.yaml
+
+# Pack de configuration Claude Code temporaire (supprime apres installation)
+_claude-setup/

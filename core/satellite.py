@@ -954,19 +954,41 @@ def demarrer_lan():
 
     import uvicorn
     hote = str(reglage("satellite_lan.host", "0.0.0.0") or "0.0.0.0")
-    port = int(reglage("satellite_lan.port", 8791))
-    serveur = uvicorn.Server(uvicorn.Config(
-        _app_lan(), host=hote, port=port, log_level="warning"))
+    serveurs = []
+    # Port chiffre (TLS, certificat epingle par les clients) : jetons, audio et
+    # reponses ne circulent plus en clair sur le Wi-Fi.
+    if bool(reglage("satellite_lan.tls", True)):
+        try:
+            from core.tls_lan import assurer_certificat, contexte_serveur
+            certificat, cle = assurer_certificat()
+            port_tls = int(reglage("satellite_lan.port_tls", 8792))
+            config_tls = uvicorn.Config(
+                _app_lan(), host=hote, port=port_tls,
+                ssl_certfile=str(certificat), ssl_keyfile=str(cle), log_level="warning")
+            config_tls.load()
+            # uvicorn cree son contexte avec ssl.SSLContext, que truststore remplace
+            # dans Jarvis : ce contexte-la refuserait tous les clients (voir tls_lan).
+            config_tls.ssl = contexte_serveur(certificat, cle)
+            serveurs.append(("satellite-lan-tls", uvicorn.Server(config_tls), port_tls))
+        except Exception:
+            LOG.exception("satellite: TLS LAN indisponible")
+    # Port en clair : garde le temps de basculer chaque client, puis
+    # satellite_lan.clair: false le ferme.
+    if bool(reglage("satellite_lan.clair", True)):
+        port_clair = int(reglage("satellite_lan.port", 8791))
+        serveurs.append(("satellite-lan", uvicorn.Server(uvicorn.Config(
+            _app_lan(), host=hote, port=port_clair, log_level="warning")), port_clair))
 
-    def run():
+    def lancer(serveur):
         try:
             serveur.run()
         except Exception:
             LOG.exception("satellite: serveur LAN")
 
-    _SERVEUR_LAN = threading.Thread(
-        target=run, daemon=True, name="satellite-lan")
-    _SERVEUR_LAN.start()
+    for nom_fil, serveur, _port in serveurs:
+        _SERVEUR_LAN = threading.Thread(
+            target=lancer, args=(serveur,), daemon=True, name=nom_fil)
+        _SERVEUR_LAN.start()
 
     # Prépare le très court « Oui ? » dès le démarrage. Le premier wake word ne
     # paie ainsi normalement ni la latence réseau ni la synthèse cloud.
@@ -980,10 +1002,11 @@ def demarrer_lan():
                 daemon=True,
                 name="satellite-accuse-reveil",
             ).start()
-    for _ in range(40):
-        try:
-            socket.create_connection(("127.0.0.1", port), 0.15).close()
-            break
-        except OSError:
-            time.sleep(0.15)
-    LOG.info("satellite: listener LAN actif sur %s:%d", hote, port)
+    for nom_fil, _serveur, port in serveurs:
+        for _ in range(40):
+            try:
+                socket.create_connection(("127.0.0.1", port), 0.15).close()
+                break
+            except OSError:
+                time.sleep(0.15)
+        LOG.info("satellite: listener LAN actif sur %s:%d (%s)", hote, port, nom_fil)

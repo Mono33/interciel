@@ -1,5 +1,8 @@
 # Copier ce fichier en config.yaml SUR LE POSTE PRINCIPAL.
-serveur_url: "ws://ADRESSE_DU_SERVEUR:8791/desktop-agent"
+# wss:// (port 8792) chiffre les echanges et verifie que c'est bien le serveur :
+# copie son certificat public (certs/jarvis-lan.crt) a cote de ce fichier.
+serveur_url: "wss://ADRESSE_DU_SERVEUR:8792/desktop-agent"
+certificat: "jarvis-lan.crt"
 agent_id: "bureau"
 token: "MEME_SECRET_QUE_DESKTOP_AGENTS_COTE_SERVEUR"
 
@@ -38,7 +41,7 @@ gestes:
 audio:
   actif: true
   brief_au_demarrage: true     # une seule fois par jour, même après plusieurs redémarrages
-  pc_url: "ws://ADRESSE_DU_SERVEUR:8791/satellite"
+  pc_url: "wss://ADRESSE_DU_SERVEUR:8792/satellite"   # meme certificat que ci-dessus
   satellite_id: "bureau"
   token: "MEME_SECRET_QUE_SATELLITES_COTE_SERVEUR"
   # null suit le micro par defaut de Windows, qui peut basculer tout seul sur un

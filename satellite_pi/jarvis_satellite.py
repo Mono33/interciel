@@ -43,6 +43,32 @@ def _conf():
     return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
 
 
+def contexte_tls(url, certificat, base=RACINE):
+    """Contexte TLS pour wss:// qui n'accepte QUE le certificat du serveur Jarvis
+    (copie locale de certs/jarvis-lan.crt). None pour ws:// (ancien port en clair)."""
+    if not str(url or "").startswith("wss://"):
+        return None
+    if not certificat:
+        raise ValueError("wss:// demande « certificat: » (copie du certificat du serveur)")
+    import ssl
+    chemin = Path(str(certificat))
+    chemin = chemin if chemin.is_absolute() else base / chemin
+    # Classe d'origine : sur le PC, truststore.inject_into_ssl() remplace
+    # ssl.SSLContext et melerait le magasin Windows a l'epinglage. Ses setters
+    # Python (verify_mode, minimum_version) bouclent alors sans fin : on garde les
+    # valeurs par defaut de PROTOCOL_TLS_CLIENT, deja strictes, et on les verifie.
+    classe = next(c for c in ssl.SSLContext.__mro__ if c.__module__ == "ssl")
+    contexte = classe(ssl.PROTOCOL_TLS_CLIENT)
+    # Certificat epingle : seule la cle du serveur peut le presenter, quelle que
+    # soit l'adresse IP utilisee pour le joindre (d'ou pas de controle du nom).
+    contexte.check_hostname = False
+    if (contexte.verify_mode != ssl.CERT_REQUIRED
+            or contexte.minimum_version < ssl.TLSVersion.TLSv1_2):
+        raise ValueError("contexte TLS trop permissif")
+    contexte.load_verify_locations(cafile=str(chemin))
+    return contexte
+
+
 def _evenement(nom, valeur=None):
     """Point d'accroche facultatif pour un affichage local (fenetre Jarvis du poste
     Windows). Sans recepteur configure, comme sur un Raspberry Pi, rien ne se passe."""
@@ -517,10 +543,11 @@ def _jouer_pcm(pcm, freq):
         print("  [audio] lecture impossible:", e)
 
 
-async def _session(url, satellite, token, file_audio, occupe, micro):
+async def _session(url, satellite, token, file_audio, occupe, micro, tls=None):
     """Une connexion au PC : envoie les énoncés de la file, joue les réponses."""
     import websockets
-    async with websockets.connect(url, max_size=None) as ws:
+    options = {"ssl": tls} if tls is not None else {}
+    async with websockets.connect(url, max_size=None, **options) as ws:
         await ws.send(json.dumps({"type": "hello", "satellite": satellite, "token": token}))
         # attendre pret
         while True:
@@ -621,12 +648,12 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
             tache_emet.cancel()
 
 
-async def _boucle(url, satellite, token, file_audio, occupe, micro):
+async def _boucle(url, satellite, token, file_audio, occupe, micro, tls=None):
     """Reconnexion automatique tant que le PC n'est pas joignable."""
     prevenu = False
     while True:
         try:
-            await _session(url, satellite, token, file_audio, occupe, micro)
+            await _session(url, satellite, token, file_audio, occupe, micro, tls=tls)
             prevenu = False
         except Exception as e:
             micro.fermer_relance()
@@ -656,13 +683,21 @@ def main():
     if not url.startswith(("ws://", "wss://")):
         print("pc_url doit commencer par ws:// ou wss://")
         sys.exit(1)
+    try:
+        tls = contexte_tls(url, CONF.get("certificat"))
+    except (ValueError, OSError) as e:
+        print(f"certificat du serveur inutilisable : {e}")
+        sys.exit(1)
+    if tls is None:
+        print("  [securite] pc_url en ws:// : jeton et audio passent EN CLAIR sur le "
+              "reseau. Passe en wss:// avec « certificat: » (voir docs/satellite.md).")
 
     file_audio = queue.Queue()
     occupe = threading.Event()
     micro = Micro(CONF, file_audio, occupe)
     threading.Thread(target=micro.run, name="micro", daemon=True).start()
     try:
-        asyncio.run(_boucle(url, satellite, token, file_audio, occupe, micro))
+        asyncio.run(_boucle(url, satellite, token, file_audio, occupe, micro, tls=tls))
     except KeyboardInterrupt:
         micro.stop.set()
         print("\nAu revoir.")

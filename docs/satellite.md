@@ -118,10 +118,23 @@ si deux matériels ont des gains très différents.
   satellite est configuré, un listener dédié `0.0.0.0:8791` est lancé avec
   **uniquement** `/satellite` ; panneau, cockpit, inbox et Twilio n'y existent pas.
 - **Token par satellite** (`satellites[].token`), comparé en **timing-safe**.
+- **Chiffrement (wss://, port 8792)** : au premier démarrage, le serveur crée une
+  clé et un certificat auto-signé dans `certs/` (jamais versionnés). Copie le
+  certificat **public** `certs/jarvis-lan.crt` à côté de la config du client, puis :
+  ```yaml
+  pc_url: "wss://<ADRESSE_DU_SERVEUR>:8792/satellite"
+  certificat: "jarvis-lan.crt"
+  ```
+  Le client n'accepte que ce certificat : le jeton, l'audio et les réponses ne
+  passent plus en clair, et un appareil du Wi-Fi ne peut pas se faire passer pour
+  le serveur. Le port en clair `8791` reste ouvert pendant la bascule ; une fois
+  tous les clients en `wss://`, mets `satellite_lan.clair: false`.
 - **Droits = commande vocale à la maison** : N1 direct ; N2 demande une
   confirmation qui peut être mémorisée ; **N3 (mail, appel, extinction…) exige une
   CONFIRMATION vocale à chaque fois**. Le serveur passe en
-  `attente_confirmation` et attend un « oui » dans l'énoncé suivant.
+  `attente_confirmation` et attend un « oui » dans l'énoncé suivant. Un satellite
+  arrivé par Tailscale (donc potentiellement de loin) n'a jamais droit aux N3, et
+  `satellites[].actions_critiques: false` les retire à un micro précis.
 
 ## Tester sans matériel
 

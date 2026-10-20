@@ -218,8 +218,9 @@ factures:                      # statut de facturation (facture.net) — LECTURE
 
 mcp:                           # serveur MCP (expose les outils domotique/PC ; voir docs/mcp.md)
   transport: "stdio"           # "stdio" (clients desktop) ou "http" (client distant)
-  host: "127.0.0.1"            # (transport http)
+  host: "127.0.0.1"            # (transport http) ; hors 127.0.0.1, un jeton est obligatoire
   port: 8765                   # (transport http)
+  token: ""                    # (transport http) jeton exige en « Authorization: Bearer ... » ; vide = aucun
 
 instagram:                     # analyse Instagram vs la veille (API Graph ; voir docs/instagram.md)
   version_api: "v21.0"
@@ -518,7 +519,10 @@ desktop_agents:
 satellite_lan:
   actif: true
   host: "0.0.0.0"             # listener dédié : /satellite et /desktop-agent uniquement
-  port: 8791
+  port: 8791                   # port EN CLAIR (ws://), le temps de basculer les clients
+  tls: true                    # port chiffré (wss://), certificat auto-signé créé dans certs/
+  port_tls: 8792
+  clair: true                  # false une fois tous les clients en wss:// : ferme le port 8791
   whisper_modele: "small"      # modèle dédié au satellite, plus léger que le principal
   whisper_device: "cpu"        # évite de charger un second Whisper sur le GPU
   whisper_compute_type: "int8"
