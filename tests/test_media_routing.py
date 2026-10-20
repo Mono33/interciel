@@ -1,4 +1,5 @@
 """Tests hors réseau du routage média direct, sans Astra."""
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -596,6 +597,85 @@ class PlaylistLancementTests(unittest.TestCase):
                 patch("tools.spotify.requests") as api:
             api.get.return_value = SimpleNamespace(status_code=403, json=lambda: {})
             self.assertIsNone(spotify._nombre_titres("spotify:playlist:P9"))
+
+
+class AjoutPlaylistTests(unittest.TestCase):
+    """Ajout à une playlist : uniquement l'endpoint /items, jamais d'appel réel."""
+
+    URI = "spotify:track:T1"
+
+    @staticmethod
+    def _page(items, suivante=None):
+        return SimpleNamespace(status_code=200,
+                               json=lambda: {"items": items, "next": suivante})
+
+    def _deja_present(self, *pages):
+        with patch("tools.spotify._h", return_value={}), \
+                patch("tools.spotify.requests") as api:
+            api.get.side_effect = list(pages)
+            present = spotify._deja_present("P9", self.URI)
+        return present, api
+
+    def test_doublon_cherche_sur_l_endpoint_items(self):
+        present, api = self._deja_present(
+            self._page([{"item": {"uri": "spotify:track:autre"}},
+                        {"item": {"uri": self.URI}}]))
+        self.assertTrue(present)
+        url = api.get.call_args.args[0]
+        self.assertIn("/playlists/P9/items?", url)
+        self.assertNotIn("/tracks", url)
+        # /items plafonne à 50 éléments par page (400 au-delà).
+        self.assertIn("limit=50", url)
+
+    def test_doublon_lu_aussi_sous_l_ancien_champ_track(self):
+        present, _ = self._deja_present(self._page([{"track": {"uri": self.URI}}]))
+        self.assertTrue(present)
+
+    def test_doublon_trouve_sur_une_page_suivante(self):
+        suivante = "https://api.spotify.com/v1/playlists/P9/items?offset=50&limit=50"
+        present, api = self._deja_present(
+            self._page([{"item": {"uri": "spotify:track:autre"}}], suivante),
+            self._page([{"item": {"uri": self.URI}}]))
+        self.assertTrue(present)
+        self.assertEqual(api.get.call_count, 2)
+        self.assertEqual(api.get.call_args.args[0], suivante)
+
+    def test_titre_absent_ou_element_vide_n_est_pas_un_doublon(self):
+        present, _ = self._deja_present(
+            self._page([{"item": None}, {"item": {"uri": "spotify:track:autre"}}]))
+        self.assertFalse(present)
+
+    def test_erreur_reseau_n_empeche_pas_l_ajout(self):
+        with patch("tools.spotify._h", return_value={}), \
+                patch("tools.spotify.requests") as api:
+            api.get.side_effect = OSError("réseau coupé")
+            self.assertFalse(spotify._deja_present("P9", self.URI))
+
+    def _ajouter(self, deja_present):
+        with patch("tools.spotify._chercher_uri", return_value=self.URI), \
+                patch("tools.spotify._playlist_id", return_value="P9"), \
+                patch("tools.spotify._deja_present", return_value=deja_present), \
+                patch("tools.spotify.reglage", return_value="Jarvis Finds"), \
+                patch("tools.spotify._h", return_value={}), \
+                patch("tools.spotify.requests") as api:
+            api.post.return_value = SimpleNamespace(
+                status_code=201, raise_for_status=lambda: None,
+                json=lambda: {"snapshot_id": "abc"})
+            message = spotify._ajouter_titre("Titre", "Artiste")
+        return message, api
+
+    def test_ajout_poste_sur_l_endpoint_items(self):
+        message, api = self._ajouter(deja_present=False)
+        self.assertEqual(message, "Ajoutée à Jarvis Finds : Titre de Artiste.")
+        api.post.assert_called_once()
+        self.assertTrue(api.post.call_args.args[0].endswith("/playlists/P9/items"))
+        self.assertEqual(json.loads(api.post.call_args.kwargs["data"]),
+                         {"uris": [self.URI]})
+
+    def test_doublon_n_est_pas_ajoute(self):
+        message, api = self._ajouter(deja_present=True)
+        self.assertEqual(message, "« Titre » est déjà dans la playlist.")
+        api.post.assert_not_called()
 
 
 if __name__ == "__main__":

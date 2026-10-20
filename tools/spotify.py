@@ -386,13 +386,18 @@ def _ouvrir_application_spotify():
 
 
 def _deja_present(pid, uri):
-    """Évite les doublons : l'URI est-elle déjà dans la playlist ?"""
+    """Évite les doublons : l'URI est-elle déjà dans la playlist ?
+
+    Spotify refuse désormais /playlists/{id}/tracks (403) : seul /items répond, par
+    pages de 50 au plus. Chaque élément porte le titre sous « item » (« track » est
+    l'ancien nom, encore lu par prudence)."""
     try:
-        url = f"{_API}/playlists/{pid}/tracks?fields=items(track(uri)),next&limit=100"
+        url = (f"{_API}/playlists/{pid}/items"
+               "?fields=items(item(uri),track(uri)),next&limit=50")
         while url:
             d = requests.get(url, headers=_h(), timeout=15).json()
             for it in d.get("items", []):
-                if ((it.get("track") or {}).get("uri")) == uri:
+                if (it.get("item") or it.get("track") or {}).get("uri") == uri:
                     return True
             url = d.get("next")
     except Exception:
@@ -415,7 +420,7 @@ def _ajouter_titre(titre, artiste, playlist=None):
                 f"{reglage('spotify.playlist', 'Jarvis Finds')}).")
     if _deja_present(pid, uri):
         return f"« {titre} » est déjà dans la playlist."
-    r = requests.post(f"{_API}/playlists/{pid}/tracks", headers=_h(),
+    r = requests.post(f"{_API}/playlists/{pid}/items", headers=_h(),
                       data=json.dumps({"uris": [uri]}), timeout=15)
     r.raise_for_status()
     nom = demande or reglage("spotify.playlist", "Jarvis Finds")
