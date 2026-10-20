@@ -21,6 +21,7 @@ Lance directement (python hud.py) il joue un scenario en boucle pour
 voir le rendu sans le reste de l'assistant.
 """
 
+import hashlib
 import json
 import os
 import queue
@@ -86,6 +87,16 @@ _MAX_TUILES = 12
 _HISTORIQUE = deque(maxlen=40)
 
 _SERVEUR = None
+
+
+def _version_page(contenu=None):
+    """Empreinte de hud.html. Une fenetre ouverte la compare a celle annoncee par le
+    flux et se recharge seule quand la page a change (mise a jour deployee)."""
+    try:
+        contenu = _FICHIER_HTML.read_bytes() if contenu is None else contenu
+    except OSError:
+        return ""
+    return hashlib.sha1(contenu).hexdigest()[:12]
 
 
 def _diffuser(evenement):
@@ -447,6 +458,7 @@ class _Poignee(BaseHTTPRequestHandler):
         except OSError:
             self.send_error(500, "hud.html introuvable")
             return
+        corps = corps.replace(b"__VERSION_PAGE__", _version_page(corps).encode("ascii"))
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(corps)))
@@ -470,6 +482,7 @@ class _Poignee(BaseHTTPRequestHandler):
         try:
             # Instantane : etat courant puis historique recent, pour qu'un
             # onglet qui arrive (ou revient) soit tout de suite a jour.
+            self._pousser({"t": "version", "v": _version_page()})
             self._pousser({"t": "etat", "v": _ETAT["etat"]})
             self._pousser({"t": "niveau", "v": _ETAT["niveau"]})
             self._pousser({"t": "config", "modele": _ETAT["modele"],
@@ -819,33 +832,40 @@ def mettre_au_premier_plan():
 # ---------------------------------------------------------------- demonstration
 
 
-# Tuiles factices du scenario : aucune donnee reelle.
-_TUILES_DEMO = [
-    {"id": "agenda", "titre": "Agenda", "etat": "ok", "maj": "09:30", "valeur": "2",
-     "legende": "aujourd'hui", "message": "", "lignes": [
-         {"texte": "Point equipe", "detail": "aujourd'hui · 14h", "alerte": True},
-         {"texte": "Tournage studio", "detail": "aujourd'hui · 17h30", "alerte": True},
-         {"texte": "Dentiste", "detail": "jeu. 23 · 9h", "alerte": False}]},
-    {"id": "factures", "titre": "Factures", "etat": "ok", "maj": "09:00",
-     "valeur": "1 250 €", "legende": "à encaisser", "message": "", "lignes": [
-         {"texte": "1 facture en retard", "detail": "400 €", "alerte": True},
-         {"texte": "3 factures impayées", "detail": "1 250 €", "alerte": False}]},
-    {"id": "loopstr", "titre": "Loopstr", "etat": "ok", "maj": "09:15", "valeur": "2",
-     "legende": "sur 7 jours", "message": "", "lignes": [
-         {"texte": "Marque A - publication", "detail": "demain", "alerte": True},
-         {"texte": "Marque B - brief", "detail": "ven. 24", "alerte": False}]},
-    {"id": "instagram", "titre": "Instagram", "etat": "ok", "maj": "09:00",
-     "valeur": "+18", "legende": "abonnés", "message": "", "lignes": [
-         {"texte": "@compte_demo", "detail": "4210 abonnés · +18 depuis hier",
-          "alerte": False}]},
-    {"id": "discord", "titre": "Discord", "etat": "ok", "maj": "09:20", "valeur": "1",
-     "legende": "mention(s) 24 h", "message": "", "lignes": [
-         {"texte": "42 messages", "detail": "3 salon(s) actifs", "alerte": False},
-         {"texte": "#general", "detail": "30 msg · Serveur demo", "alerte": False}]},
-    {"id": "meteo", "titre": "Météo", "etat": "indisponible", "maj": "09:00",
-     "valeur": "", "legende": "", "lignes": [],
-     "message": "Indisponible pour le moment."},
-]
+def _tuiles_demo():
+    """Tuiles factices du scenario (aucune donnee reelle), datees a partir d'aujourd'hui."""
+    import datetime as dt
+    maintenant = dt.datetime.now().astimezone()
+    minuit = maintenant.replace(hour=0, minute=0, second=0, microsecond=0)
+    jour = lambda n, h=0, m=0: (minuit + dt.timedelta(days=n, hours=h, minutes=m)).isoformat()
+    maj = maintenant.strftime("%H:%M")
+
+    def tuile(id_, titre, etat="ok", **champs):
+        return {"id": id_, "titre": titre, "etat": etat, "maj": maj, "valeur": "",
+                "legende": "", "lignes": [], "message": "", **champs}
+
+    echeances = [(jour(1), "Marque A", "Publication"), (jour(1), "Marque A", "Rendu V1"),
+                 (jour(2), "Marque B", "Publication"), (jour(3), "Marque C", "Script"),
+                 (jour(6), "Marque B", "Tournage")]
+    return [
+        tuile("agenda", "Agenda", valeur="1", legende="aujourd'hui", donnees={"evenements": [
+            {"debut": (maintenant + dt.timedelta(hours=3)).isoformat(), "tout_jour": False,
+             "titre": "Point d'équipe"},
+            {"debut": jour(2, 9), "tout_jour": False, "titre": "Dentiste"}]}),
+        tuile("factures", "Factures", valeur="1 250 €", legende="à encaisser", donnees={
+            "impayees": {"nombre": 3, "montant": 1250.0}, "retard": {"nombre": 1, "montant": 400.0},
+            "aucun": False}),
+        tuile("loopstr", "Loopstr", valeur="4", legende="sur 7 jours",
+              donnees={"echeances": [{"debut": d, "marque": m, "tache": t} for d, m, t in echeances]}),
+        tuile("instagram", "Instagram", valeur="+18", legende="abonnés", donnees={"comptes": [
+            {"compte": "compte_demo", "abonnes": 4210, "delta": 18, "depuis": "hier",
+             "serie": [4100, 4120, 4131, 4150, 4149, 4170, 4192, 4210]}]}),
+        tuile("discord", "Discord", valeur="1", legende="mention(s) 24 h", donnees={
+            "mentions": 1, "messages": 42, "salons": 3, "serveurs": [
+                {"nom": "Serveur démo", "salons": [{"nom": "général", "messages": 30},
+                                                  {"nom": "projets", "messages": 12}]}]}),
+        tuile("meteo", "Météo", "indisponible", message="Indisponible pour le moment."),
+    ]
 
 
 def _scenario():
@@ -857,7 +877,7 @@ def _scenario():
     routage("hybride")
     budget(0.27, 3.0, 0.09)
     hermes(0, 48213)
-    tableau(_TUILES_DEMO)
+    tableau(_tuiles_demo())
 
     tours = [
         ("allume la lumiere de la chambre",

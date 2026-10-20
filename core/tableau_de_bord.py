@@ -21,10 +21,12 @@ Voir docs/tableau_de_bord.md.
 import datetime as dt
 import json
 import logging
+import re
 import subprocess
 import sys
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -57,6 +59,27 @@ class Source:
 
 def _texte(valeur, longueur=70):
     return " ".join(str(valeur or "").split())[:longueur]
+
+
+# Emoji et pictogrammes : « 🚀 Marque — Publication », « 💬・général ». Ils
+# ornent les noms chez Loopstr ou Discord mais ne sont pas des elements d'interface.
+_DECOR = {"‍", "︎", "️", "⃣"}
+_SEPARATEURS_TETE = "・·•|｜-–—:_~ "
+
+
+def _propre(valeur, longueur=70):
+    """Texte sans emoji ni separateur decoratif en tete (« 💬・général » -> « général »)."""
+    sans = "".join(c for c in str(valeur or "")
+                   if c not in _DECOR and not 0x1F3FB <= ord(c) <= 0x1F3FF
+                   and unicodedata.category(c) not in ("So", "Cs", "Co", "Cn"))
+    return _texte(sans.strip().lstrip(_SEPARATEURS_TETE).strip(), longueur)
+
+
+def _marque_tache(titre):
+    """« 🚀 Marque — Publication » -> ("Marque", "Publication")."""
+    propre = _propre(titre, 90)
+    morceaux = re.split(r"\s+[—–-]\s+", propre, maxsplit=1)
+    return (morceaux[0], morceaux[1]) if len(morceaux) == 2 else (propre, "")
 
 
 def _ligne(texte, detail="", alerte=False):
@@ -107,6 +130,10 @@ class Assembleur:
             "lignes": lignes,
             "message": _texte(champs.get("message"), 120),
         }
+        # Donnees structurees pour l'affichage (facultatives) : lignes/valeur restent
+        # le resume lisible par toute fenetre, meme ancienne.
+        if isinstance(champs.get("donnees"), dict):
+            tuile["donnees"] = champs["donnees"]
         if tuile["etat"] in (OK, VIDE):          # « Chrome fermé » n'est pas une lecture
             self._derniere_reussite[source.id] = base["maj"]
         return tuile, source.ttl
@@ -195,13 +222,17 @@ def source_agenda(maintenant=None):
                 evenements.append((d, tout_jour, e.get("summary", "(sans titre)")))
     evenements.sort(key=lambda x: x[0])
     if not evenements:
-        return {"etat": VIDE, "message": "Rien de prévu ces 7 prochains jours."}
+        return {"etat": VIDE, "message": "Rien de prévu ces 7 prochains jours.",
+                "donnees": {"evenements": []}}
     du_jour = sum(1 for d, _, _ in evenements if d.date() == maintenant.date())
     lignes = []
     for d, tout_jour, titre in evenements[:_MAX_LIGNES]:
         quand = _jour(d, maintenant) + ("" if tout_jour else " · " + agenda._heure_fr(d))
-        lignes.append(_ligne(titre, quand, alerte=d.date() == maintenant.date()))
-    return {"valeur": str(du_jour), "legende": "aujourd'hui", "lignes": lignes}
+        lignes.append(_ligne(_propre(titre), quand, alerte=d.date() == maintenant.date()))
+    donnees = {"evenements": [{"debut": d.isoformat(), "tout_jour": bool(tout_jour),
+                               "titre": _propre(titre)} for d, tout_jour, titre in evenements[:12]]}
+    return {"valeur": str(du_jour), "legende": "aujourd'hui", "lignes": lignes,
+            "donnees": donnees}
 
 
 def lire_factures_isole(url, port, timeout=90):
@@ -240,6 +271,10 @@ def source_factures(lecteur=lire_factures_isole):
                 "message": "Session facture.net expirée : reconnecte-toi dans ChromeJarvis."}
     if etat != "ok":
         raise RuntimeError(f"factures: {etat}")
+    donnees = {cle: {"nombre": (resume.get(cle) or {}).get("nombre"),
+                     "montant": (resume.get(cle) or {}).get("montant")} if resume.get(cle) else None
+               for cle in ("impayees", "retard")}
+    donnees["aucun"] = bool(resume.get("aucun"))
     libelles = {"retard": ("en retard", "en retard"), "impayees": ("impayée", "impayées")}
     lignes, montants = [], {}
     for cle in ("retard", "impayees"):
@@ -260,7 +295,7 @@ def source_factures(lecteur=lire_factures_isole):
     if not lignes:
         if resume.get("aucun"):
             return {"etat": OK, "valeur": "0", "legende": "impayée",
-                    "message": "Aucune facture impayée."}
+                    "message": "Aucune facture impayée.", "donnees": donnees}
         return {"etat": VIDE, "message": "Aucun impayé repéré sur le tableau de bord. "
                                          "Demande-moi « où en sont mes factures »."}
     if "impayees" in montants:
@@ -269,7 +304,7 @@ def source_factures(lecteur=lire_factures_isole):
         valeur, legende = _euros(montants["retard"]), "en retard"
     else:
         valeur, legende = "", ""
-    return {"valeur": valeur, "legende": legende, "lignes": lignes}
+    return {"valeur": valeur, "legende": legende, "lignes": lignes, "donnees": donnees}
 
 
 def source_loopstr(maintenant=None):
@@ -283,11 +318,18 @@ def source_loopstr(maintenant=None):
     echeances = [(d, t) for d, typ, t in evenements
                  if typ == "deadline" and minuit <= d < fin]
     if not echeances:
-        return {"etat": VIDE, "message": "Aucune échéance de partenariat sur 14 jours."}
+        return {"etat": VIDE, "message": "Aucune échéance de partenariat sur 14 jours.",
+                "donnees": {"echeances": []}}
     semaine = sum(1 for d, _ in echeances if d < minuit + dt.timedelta(days=7))
-    lignes = [_ligne(t, _jour(d, maintenant), alerte=(d.date() - maintenant.date()).days <= 1)
+    lignes = [_ligne(_propre(t), _jour(d, maintenant),
+                     alerte=(d.date() - maintenant.date()).days <= 1)
               for d, t in echeances[:_MAX_LIGNES]]
-    return {"valeur": str(semaine), "legende": "sur 7 jours", "lignes": lignes}
+    donnees = {"echeances": []}
+    for d, t in echeances[:12]:
+        marque, tache = _marque_tache(t)
+        donnees["echeances"].append({"debut": d.isoformat(), "marque": marque, "tache": tache})
+    return {"valeur": str(semaine), "legende": "sur 7 jours", "lignes": lignes,
+            "donnees": donnees}
 
 
 def source_instagram(aujourd_hui=None):
@@ -301,7 +343,7 @@ def source_instagram(aujourd_hui=None):
         raise NonConfigure("Instagram non configuré.")
     aujourd_hui = aujourd_hui or dt.date.today()
     historique = instagram._charger_historique()
-    lignes, total, connu, echecs = [], 0, False, 0
+    lignes, total, connu, echecs, fiches = [], 0, False, 0, []
     for compte in comptes:
         try:
             infos = instagram._get(compte["user_id"], compte["token"],
@@ -309,6 +351,8 @@ def source_instagram(aujourd_hui=None):
         except Exception:
             echecs += 1
             lignes.append(_ligne(compte["nom"], "lecture impossible", alerte=True))
+            fiches.append({"compte": _texte(compte["nom"], 40), "abonnes": None,
+                           "delta": None, "depuis": None, "serie": [], "erreur": True})
             continue
         abonnes = infos.get("followers_count")
         qui = f"@{infos['username']}" if infos.get("username") else compte["nom"]
@@ -316,6 +360,7 @@ def source_instagram(aujourd_hui=None):
         par_jour = historique.get(compte["nom"], {}) or {}
         passes = [j for j in sorted(par_jour) if j < aujourd_hui.isoformat()]
         avant = (par_jour[passes[-1]] or {}).get("abonnes") if passes else None
+        ecart, quand = None, None
         if abonnes is not None and avant is not None:
             ecart = int(abonnes) - int(avant)
             hier = (aujourd_hui - dt.timedelta(days=1)).isoformat()
@@ -325,11 +370,21 @@ def source_instagram(aujourd_hui=None):
             total += ecart
             connu = True
         lignes.append(_ligne(qui, detail))
+        # Courbe : releves quotidiens de instagram_resume (30 derniers) + valeur du jour.
+        serie = [int(v["abonnes"]) for v in (par_jour[j] or {} for j in passes[-29:])
+                 if isinstance(v.get("abonnes"), int)]
+        if abonnes is not None:
+            serie.append(int(abonnes))
+        fiches.append({"compte": _texte(infos.get("username") or compte["nom"], 40),
+                       "abonnes": abonnes, "delta": ecart, "depuis": quand,
+                       "serie": serie if len(serie) >= 2 else []})
     if echecs == len(comptes):
         raise RuntimeError("instagram: aucun compte lisible")
+    donnees = {"comptes": fiches}
     if connu:
-        return {"valeur": f"{total:+d}", "legende": "abonnés", "lignes": lignes}
-    return {"lignes": lignes}
+        return {"valeur": f"{total:+d}", "legende": "abonnés", "lignes": lignes,
+                "donnees": donnees}
+    return {"lignes": lignes, "donnees": donnees}
 
 
 def source_discord():
@@ -343,10 +398,18 @@ def source_discord():
     mentions = int(stats.get("mentions", 0))
     lignes = [_ligne(f"{stats.get('messages', 0)} messages",
                      f"{stats.get('salons', 0)} salon(s) actifs")]
-    for actif in stats.get("actifs", [])[:_MAX_LIGNES - 1]:
-        lignes.append(_ligne(f"#{actif.get('salon', '')}",
-                             f"{actif.get('messages', 0)} msg · {actif.get('serveur', '')}"))
-    return {"valeur": str(mentions), "legende": "mention(s) 24 h", "lignes": lignes}
+    serveurs = {}
+    for actif in stats.get("actifs", []):
+        salon, serveur = _propre(actif.get("salon", ""), 40), _propre(actif.get("serveur", ""), 40)
+        if len(lignes) < _MAX_LIGNES:
+            lignes.append(_ligne(f"#{salon}", f"{actif.get('messages', 0)} msg · {serveur}"))
+        serveurs.setdefault(serveur, []).append(
+            {"nom": salon, "messages": int(actif.get("messages", 0))})
+    donnees = {"mentions": mentions, "messages": int(stats.get("messages", 0)),
+               "salons": int(stats.get("salons", 0)),
+               "serveurs": [{"nom": nom, "salons": salons} for nom, salons in serveurs.items()]}
+    return {"valeur": str(mentions), "legende": "mention(s) 24 h", "lignes": lignes,
+            "donnees": donnees}
 
 
 def source_colis():
@@ -360,7 +423,10 @@ def source_colis():
     lignes = [_ligne(c["marchand"], libelles.get(c["etape"], ""),
                      alerte=c["etape"] in ("livraison", "relais"))
               for c in en_cours[:_MAX_LIGNES]]
-    return {"valeur": str(len(en_cours)), "legende": "en cours", "lignes": lignes}
+    donnees = {"colis": [{"marchand": _propre(c["marchand"], 40), "etape": c["etape"],
+                          "libelle": libelles.get(c["etape"], "")} for c in en_cours[:8]]}
+    return {"valeur": str(len(en_cours)), "legende": "en cours", "lignes": lignes,
+            "donnees": donnees}
 
 
 def source_meteo():
@@ -371,17 +437,22 @@ def source_meteo():
     actuel, jour = d["current"], d.get("daily", {})
     ciel = meteo._CODES_METEO.get(actuel.get("weather_code"), "temps variable")
     lignes = []
+    donnees = {"temperature": round(actuel["temperature_2m"]), "ciel": ciel,
+               "code": actuel.get("weather_code"), "lieu": _texte(meteo._LIEU.get("ville"), 40),
+               "min": None, "max": None, "pluie": None}
     try:
+        donnees["min"] = round(jour["temperature_2m_min"][0])
+        donnees["max"] = round(jour["temperature_2m_max"][0])
         lignes.append(_ligne(meteo._LIEU.get("ville") or "Aujourd'hui",
-                             f"{round(jour['temperature_2m_min'][0])}° / "
-                             f"{round(jour['temperature_2m_max'][0])}°"))
+                             f"{donnees['min']}° / {donnees['max']}°"))
         pluie = jour.get("precipitation_probability_max", [None])[0]
         if pluie is not None:
+            donnees["pluie"] = pluie
             lignes.append(_ligne("Pluie", f"{pluie} %", alerte=pluie >= 60))
     except (KeyError, IndexError, TypeError):
         pass
     return {"valeur": f"{round(actuel['temperature_2m'])}°", "legende": ciel,
-            "lignes": lignes}
+            "lignes": lignes, "donnees": donnees}
 
 
 def source_spotify():
@@ -395,8 +466,11 @@ def source_spotify():
     artistes = ", ".join(a.get("name", "") for a in morceau.get("artists", [])[:2])
     appareil = ((etat.get("device") or {}).get("name")) or ""
     statut = "en lecture" if etat.get("is_playing") else "en pause"
+    donnees = {"titre": _texte(morceau.get("name"), 80), "artistes": _texte(artistes, 80),
+               "appareil": _texte(appareil, 40), "lecture": bool(etat.get("is_playing"))}
     return {"etat": OK, "lignes": [_ligne(morceau.get("name", ""), artistes),
-                                   _ligne(statut.capitalize(), appareil)]}
+                                   _ligne(statut.capitalize(), appareil)],
+            "donnees": donnees}
 
 
 # Ordre d'affichage par defaut ; hud.tableau_de_bord.sources choisit et ordonne.

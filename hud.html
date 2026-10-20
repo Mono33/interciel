@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JARVIS · Reacteur arc</title>
+<meta name="jarvis-version" content="__VERSION_PAGE__">
 <style>
   :root {
     --fond: #04070a;
@@ -12,6 +13,13 @@
     --vous: #6fe3ff;
     --jarvis: #ffb23e;
     --mono: "Consolas", "SF Mono", "Menlo", "DejaVu Sans Mono", monospace;
+    --sans: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --ease-tb: cubic-bezier(.2, .8, .2, 1);
+    --tb-marge: clamp(24px, 3.4vw, 64px);
+    --tb-texte-2: rgba(255,255,255,.7);
+    --tb-texte-3: rgba(255,255,255,.46);
+    --tb-vert: #46d369;
+    --tb-rouge: #ff6b6b;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -187,26 +195,33 @@
     right: 42px; top: 112px;
     z-index: 21;
     display: flex;
-    gap: 8px;
+    align-items: center;
+    gap: 10px;
+    transition: top .5s var(--ease-tb), right .5s var(--ease-tb);
   }
   .controle-bouton {
-    border: 1px solid rgba(111,227,255,0.25);
-    background: rgba(4,12,17,0.72);
-    color: var(--texte-faible);
-    padding: 8px 12px;
-    font: 10px var(--mono);
-    letter-spacing: 2px;
-    text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 38px; padding: 0 16px;
+    border: 0; border-radius: 999px;
+    background: rgba(255,255,255,.1);
+    color: rgba(255,255,255,.82);
+    font: 600 14px var(--sans);
     cursor: pointer;
-    transition: color .2s, border-color .2s, box-shadow .2s;
+    backdrop-filter: blur(16px);
+    transition: background .2s, color .2s, transform .2s var(--ease-tb);
   }
+  .controle-bouton svg { width: 18px; height: 18px; flex: none; }
   .controle-bouton[hidden] { display: none; }
-  .controle-bouton:hover, .controle-bouton[aria-expanded="true"],
-  .controle-bouton[aria-pressed="true"] {
-    color: var(--vous);
-    border-color: rgba(111,227,255,0.65);
-    box-shadow: 0 0 16px rgba(111,227,255,0.10);
+  .controle-bouton:hover { background: rgba(255,255,255,.2); color: #fff; transform: scale(1.04); }
+  .controle-bouton:active { transform: scale(.97); }
+  .controle-bouton:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  .controle-bouton[aria-pressed="true"], .controle-bouton[aria-expanded="true"] {
+    background: #fff; color: #000;
   }
+  .tb-heure { display: none; margin-right: 8px; font: 300 34px var(--sans);
+    font-variant-numeric: tabular-nums; color: #fff; }
+  body.mode-tableau .tb-heure { display: block; }
+  body.mode-tableau .barre-boutons { top: clamp(28px, 3.6vh, 40px); right: var(--tb-marge); }
   .controle-tiroir {
     position: fixed;
     z-index: 20;
@@ -266,68 +281,269 @@
   }
   .controle-panneau:hover { color: var(--vous); }
 
-  /* --- tableau de bord : au repos, le reacteur se range dans un coin --- */
-  body.mode-tableau #reacteur { top: 100px; left: 100px; width: 136px; height: 136px; }
-  body.mode-tableau .etiquette-etat {
-    top: 100px; left: 186px; transform: translate(0, -50%);
-    font-size: 11px; letter-spacing: 5px;
+  /* ================================================================ tableau de bord
+     Direction « Cinema » : au repos, une banniere met en scene ce qui arrive, puis
+     deux rangees de cartes. Le reacteur se range dans le coin de la banniere. */
+  body.mode-tableau #reacteur {
+    z-index: 6;
+    top: calc(clamp(28px, 3.6vh, 40px) + 19px); left: calc(var(--tb-marge) + 29px);
+    width: 58px; height: 58px;
   }
-  body.mode-tableau .releve, body.mode-tableau .transcription {
-    opacity: 0; pointer-events: none;
-  }
-  .releve { transition: opacity .4s ease; }
+  #reacteur { transition: top .55s var(--ease-tb), left .55s var(--ease-tb),
+                          width .55s var(--ease-tb), height .55s var(--ease-tb); }
+  body.mode-tableau .etiquette-etat, body.mode-tableau .releve,
+  body.mode-tableau .transcription, body.mode-tableau .horloge,
+  body.mode-tableau .coin { opacity: 0; pointer-events: none; }
+  .releve, .horloge, .coin { transition: opacity .4s ease; }
+
   .tableau {
-    position: fixed;
-    top: 186px; left: 40px; right: 40px; bottom: 40px;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
-    align-content: start;
-    gap: 18px;
-    overflow-x: hidden;
-    overflow-y: auto;
-    opacity: 0;
-    transform: translateY(14px);
-    pointer-events: none;
-    transition: opacity .45s ease, transform .45s ease;
+    --tb-accent: #ff8a3d;
+    --tb-accent-2: #e1306c;
+    position: fixed; inset: 0; z-index: 5;
+    display: grid; grid-template-rows: minmax(0, 1fr) auto auto;
+    background: #000; color: #fff;
+    font-family: var(--sans); font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity .45s var(--ease-tb), visibility 0s linear .45s;
   }
-  body.mode-tableau .tableau { opacity: 1; transform: none; pointer-events: auto; }
-  .tuile {
-    display: flex; flex-direction: column; gap: 10px;
-    min-height: 172px; min-width: 0;
-    padding: 18px 20px;
-    border: 1px solid rgba(111,227,255,.16);
-    background: linear-gradient(145deg, rgba(7,18,24,.86), rgba(3,8,12,.86));
-    box-shadow: inset 0 0 36px rgba(111,227,255,.025);
+  body.mode-tableau .tableau {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transition: opacity .45s var(--ease-tb);
   }
-  .tuile-tete { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-  .tuile h3 {
-    color: #78909b; font-size: 11px; font-weight: 500;
-    letter-spacing: 3px; text-transform: uppercase;
+  @keyframes tb-monte { from { opacity: 0; transform: translateY(24px); } }
+  @keyframes tb-derive { to { transform: scale(1.06) translate(-1.5%, 1%); } }
+
+  /* ---- banniere */
+  .tb-banniere {
+    position: relative; overflow: hidden; min-height: 0;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    padding: 110px var(--tb-marge) clamp(20px, 3vh, 38px);
   }
-  .tuile .maj { color: var(--texte-faible); font-size: 9px; letter-spacing: 1px; }
-  .tuile-chiffre { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-  .tuile-chiffre b {
-    color: var(--vous); font-size: clamp(24px, 2.2vw, 38px); font-weight: 400;
-    text-shadow: 0 0 14px rgba(111,227,255,.35); white-space: nowrap;
+  .tb-art {
+    position: absolute; inset: -4%;
+    background:
+      radial-gradient(52% 78% at 72% 36%, color-mix(in srgb, var(--tb-accent) 72%, transparent), transparent 64%),
+      radial-gradient(42% 64% at 98% 92%, color-mix(in srgb, var(--tb-accent-2) 62%, transparent), transparent 64%),
+      radial-gradient(48% 70% at 52% -10%, rgba(129,52,175,.62), transparent 68%),
+      radial-gradient(30% 50% at 30% 110%, color-mix(in srgb, var(--tb-accent-2) 28%, transparent), transparent 70%),
+      #0b0607;
+    transition: background 1.2s ease;
+    animation: tb-derive 26s ease-in-out infinite alternate;
   }
-  .tuile-chiffre span {
-    color: var(--texte-faible); font-size: 10px; letter-spacing: 2px;
-    text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  .tb-sigle {
+    position: absolute; right: 5%; top: 50%; transform: translateY(-48%);
+    font-size: min(38vh, 24vw); font-weight: 800; letter-spacing: -.06em; line-height: 1;
+    color: transparent; -webkit-text-stroke: 2px rgba(255,255,255,.14);
+    white-space: nowrap; user-select: none; pointer-events: none;
   }
-  .tuile ul { list-style: none; display: flex; flex-direction: column; gap: 7px; }
-  .tuile li { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; line-height: 1.35; }
-  .tuile li .texte { color: var(--texte); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tuile li .detail { color: var(--texte-faible); flex-shrink: 0; white-space: nowrap; }
-  .tuile li.alerte .texte, .tuile li.alerte .detail { color: var(--jarvis); }
-  .tuile .message { color: var(--texte-faible); font-size: 11.5px; line-height: 1.5; }
-  .tuile.indisponible { border-color: rgba(255,124,124,.28); }
-  .tuile.indisponible .message { color: #ff9c9c; }
-  .tuile.non_configure { opacity: .6; }
+  .tb-voile {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      linear-gradient(90deg, rgba(0,0,0,.86) 0%, rgba(0,0,0,.45) 42%, transparent 72%),
+      linear-gradient(0deg, #000 0%, rgba(0,0,0,.55) 22%, transparent 55%),
+      linear-gradient(180deg, rgba(0,0,0,.55) 0%, transparent 24%);
+  }
+  .tb-moi {
+    position: absolute; z-index: 2;
+    top: clamp(28px, 3.6vh, 40px); left: calc(var(--tb-marge) + 74px);
+    height: 38px; display: flex; flex-direction: column; justify-content: center;
+  }
+  .tb-moi b { font-size: 22px; font-weight: 650; letter-spacing: -.01em; line-height: 1.15; }
+  .tb-moi span { font-size: 14px; color: var(--tb-texte-2); }
+  .tb-vedette { position: relative; z-index: 1; max-width: min(62%, 1200px); }
+  .tb-sur { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; color: var(--tb-accent); }
+  .tb-sur svg { width: 20px; height: 20px; }
+  .tb-titre {
+    margin-top: 12px; font-size: clamp(46px, 7.4vh, 96px); font-weight: 750;
+    letter-spacing: -.035em; line-height: 1.02; text-shadow: 0 6px 40px rgba(0,0,0,.5);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .tb-titre.long { font-size: clamp(38px, 5.4vh, 70px); }
+  .tb-meta { margin-top: 18px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px;
+    font-size: 17px; color: var(--tb-texte-2); }
+  .tb-etiquette { padding: 5px 12px; border-radius: 6px; background: var(--tb-accent);
+    color: #140600; font-weight: 700; font-size: 15px; }
+  .tb-ensuite { margin-top: 14px; font-size: 15px; color: var(--tb-texte-3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-ensuite b { color: var(--tb-texte-2); font-weight: 600; }
+
+  .tb-coup-oeil {
+    position: absolute; z-index: 1; right: var(--tb-marge); bottom: clamp(20px, 3vh, 38px);
+    width: clamp(260px, 22vw, 380px); display: flex; flex-direction: column; gap: 10px;
+  }
+  .tb-puce {
+    --accent: #fff;
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-width: 0;
+    border-radius: 14px; border: 1px solid rgba(255,255,255,.1);
+    background: rgba(10,10,14,.55); backdrop-filter: blur(18px);
+    transition: transform .2s var(--ease-tb), background .2s;
+  }
+  .tb-puce:hover { transform: translateX(-4px); background: rgba(22,22,28,.75); }
+  .tb-puce svg { width: 24px; height: 24px; flex: none; color: var(--accent); }
+  .tb-puce div { min-width: 0; }
+  .tb-puce b, .tb-puce span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-puce b { font-size: 15px; font-weight: 650; }
+  .tb-puce span { font-size: 13px; color: var(--tb-texte-2); }
+
+  /* ---- rangees */
+  .tb-rangee { min-width: 0; padding: 0 var(--tb-marge); margin-top: clamp(8px, 1.4vh, 16px); }
+  .tb-rangee:last-child { margin-bottom: clamp(18px, 2.8vh, 34px); }
+  .tb-rangee[hidden] { display: none; }
+  .tb-rangee h2 { margin-bottom: 12px; font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
+  .tb-rangee h2 span { margin-left: 8px; font-size: 15px; font-weight: 400; color: var(--tb-texte-3); }
+  .tb-rail { display: flex; gap: 14px; min-width: 0; }
+  .tb-rail:has(> .tb-carte:hover) > .tb-carte:not(:hover) { opacity: .72; }
+
+  .tb-carte {
+    --accent: #3cc8ff; --zoom: 1.04;
+    position: relative; overflow: hidden; min-width: 0; flex: 1 1 0;
+    padding: 18px 20px; border-radius: 10px;
+    background: #14161c; box-shadow: 0 10px 30px -14px rgba(0,0,0,.9);
+    transition: transform .26s var(--ease-tb), box-shadow .26s var(--ease-tb),
+                background .26s, opacity .26s;
+  }
+  .tb-carte[role="button"] { cursor: pointer; }
+  .tb-carte::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+    background: var(--accent); opacity: .9; }
+  .tb-carte::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(420px 210px at 100% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%); }
+  .tb-carte > * { position: relative; }
+  .tb-carte[role="button"]:hover {
+    transform: scale(var(--zoom)); z-index: 3; background: #1b1e26;
+    box-shadow: 0 30px 70px -18px #000, 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .tb-carte:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  .tb-carte.ouverte { visibility: hidden; }
+  .tableau.tb-entree .tb-vedette { animation: tb-monte .8s var(--ease-tb) backwards; }
+  .tableau.tb-entree .tb-carte, .tableau.tb-entree .tb-puce, .tb-carte.tb-nouvelle {
+    animation: tb-monte .7s var(--ease-tb) backwards;
+    animation-delay: calc(140ms + var(--i, 0) * 50ms);
+  }
+
+  /* affiches « a venir » */
+  .tb-affiche { --zoom: 1.07; flex: 0 1 var(--tb-place, 300px); min-height: clamp(146px, 16vh, 210px); }
+  .tb-date { display: flex; align-items: baseline; gap: 8px; }
+  .tb-date b { font-size: clamp(34px, 4.2vh, 50px); font-weight: 700; letter-spacing: -.03em; line-height: 1; }
+  .tb-date span { font-size: 15px; font-weight: 600; color: var(--tb-texte-2); }
+  .tb-date.proche span { color: var(--accent); }
+  .tb-marque { margin-top: 14px; font-size: 18px; font-weight: 650;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-tache { font-size: 15px; color: var(--tb-texte-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-plus { margin-top: 8px; font-size: 13px; color: var(--tb-texte-2);
+    max-height: 0; opacity: 0; transition: max-height .26s var(--ease-tb), opacity .2s; }
+  .tb-carte:hover .tb-plus { max-height: 40px; opacity: 1; }
+  .tb-autres { display: flex; flex-direction: column; justify-content: center; }
+  .tb-autres b { font-size: clamp(34px, 4.2vh, 50px); font-weight: 700; letter-spacing: -.03em; }
+  .tb-autres span { font-size: 15px; color: var(--tb-texte-2); }
+
+  /* cartes de suivi */
+  /* poids >= 1 : seule, une carte prend toute la largeur */
+  .tb-suivi > .tb-insta { flex-grow: 1.35; }
+  .tb-suivi > .tb-discord { flex-grow: 1.45; }
+  .tb-suivi > .tb-factures, .tb-suivi > .tb-generique { flex-grow: 1.15; }
+  .tb-suivi > .tb-etat { flex-grow: 1; }
+  .tb-etat .tb-liste { column-width: 340px; column-gap: 32px; }
+  .tb-etat .tb-liste li { break-inside: avoid; }
+  .tb-tete { display: flex; align-items: center; gap: 10px; min-width: 0;
+    font-size: 14px; font-weight: 600; color: var(--tb-texte-2); }
+  .tb-tete svg { width: 20px; height: 20px; flex: none; color: var(--accent); }
+  .tb-tete .aside { margin-left: auto; font-weight: 400; color: var(--tb-texte-3); white-space: nowrap; }
+  .tb-id { margin-top: 12px; font-size: 14px; color: var(--tb-texte-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-grand { font-size: clamp(36px, 4.6vh, 54px); font-weight: 700; letter-spacing: -.03em; line-height: 1.05; white-space: nowrap; }
+  .tb-ligne-stat { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+  .tb-delta { font-size: 14px; font-weight: 650; white-space: nowrap; color: var(--tb-texte-3); }
+  .tb-delta.haut { color: var(--tb-vert); }
+  .tb-delta.bas { color: var(--tb-rouge); }
+  .tb-delta small { margin-left: 4px; font-size: 13px; font-weight: 400; color: var(--tb-texte-3); }
+  .tb-mentions { display: flex; align-items: baseline; gap: 12px; margin-top: 10px; min-width: 0; }
+  .tb-mentions small { font-size: 15px; color: var(--tb-texte-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-liste { list-style: none; margin-top: 8px; font-size: 14px; color: var(--tb-texte-2); }
+  .tb-liste li { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; min-width: 0; }
+  .tb-liste li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tb-liste li.alerte { color: var(--accent); }
+  .tb-liste .salon::before { content: "# "; color: var(--tb-texte-3); }
+  .tb-etat { background: transparent; border: 1px dashed rgba(255,255,255,.18); box-shadow: none; }
+  .tb-etat::after, .tb-etat::before { display: none; }
+  .tb-etat .tb-liste li { display: block; padding: 4px 0; line-height: 1.35; }
+  .tb-etat .tb-liste b { color: #fff; font-weight: 600; }
+  .tb-etat .tb-liste i { display: inline-block; width: 7px; height: 7px; margin: 0 8px 1px 0; border-radius: 50%; background: var(--tb-texte-3); }
+  .tb-etat .tb-liste .ko i { background: var(--tb-rouge); }
+  .tb-etat .tb-liste .ok i { background: var(--tb-vert); }
+
+  /* courbe (une serie, encre attenuee, dernier point en couleur de la source) */
+  .tb-courbe { position: relative; width: 100%; height: 46px; margin-top: 8px; }
+  .tb-courbe svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .tb-courbe .ligne { fill: none; stroke: rgba(255,255,255,.42); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .tb-courbe .aire { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .tb-courbe .point { fill: var(--accent); stroke: #14161c; stroke-width: 2; }
+  .tb-courbe .repere { stroke: rgba(255,255,255,.35); stroke-width: 1; opacity: 0; }
+  .tb-courbe.active .repere { opacity: 1; }
+  .tb-courbe .bulle { position: absolute; bottom: calc(100% + 6px); transform: translateX(-50%);
+    padding: 4px 8px; border-radius: 6px; background: #000; border: 1px solid rgba(255,255,255,.12);
+    font-size: 12px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s; }
+  .tb-courbe.active .bulle { opacity: 1; }
+
+  /* ---- vue detaillee */
+  .tb-fond { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.72); }
+  .tb-detail {
+    --accent: #3cc8ff;
+    position: fixed; z-index: 41; left: 50%; top: 8vh;
+    width: min(980px, 88vw); max-height: 84vh; margin-left: calc(min(980px, 88vw) / -2);
+    overflow: auto; padding-bottom: 30px; border-radius: 12px; background: #181818;
+    color: #fff; font-family: var(--sans); box-shadow: 0 40px 120px rgba(0,0,0,.9);
+    transform-origin: top left;
+  }
+  .tb-detail .tete-d { min-height: 190px; padding: 0 40px 24px; display: flex; flex-direction: column; justify-content: flex-end;
+    background: radial-gradient(600px 300px at 80% 20%, color-mix(in srgb, var(--accent) 60%, transparent), transparent 70%),
+                linear-gradient(0deg, #181818, rgba(24,24,24,.2)), #120c0a; }
+  .tb-detail h2 { font-size: 40px; font-weight: 750; letter-spacing: -.02em; }
+  .tb-detail .chapo { margin-top: 4px; font-size: 16px; color: var(--tb-texte-2); }
+  .tb-detail .corps { padding: 18px 40px 0; }
+  .tb-detail .ligne-d { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 16px; align-items: center;
+    padding: 14px 12px; margin: 0 -12px; border-radius: 8px; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 16px; }
+  .tb-detail .ligne-d:hover { background: rgba(255,255,255,.06); }
+  .tb-detail .ligne-d > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tb-detail .ligne-d .muet { color: var(--tb-texte-3); }
+  .tb-detail .tb-courbe { height: 120px; margin: 10px 0 26px; }
+  .tb-fermer { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; border: 0; border-radius: 50%;
+    background: rgba(0,0,0,.6); color: #fff; cursor: pointer; display: grid; place-items: center; }
+  .tb-fermer svg { width: 18px; height: 18px; }
+  .tb-fermer:hover { background: rgba(0,0,0,.85); }
+
+  /* Grands ecrans : tout le tableau grandit d'un quart, pour rester lisible de loin. */
+  @media (min-width: 2200px) and (min-height: 1200px) {
+    .tableau, .tb-detail { zoom: 1.25; }
+    body.mode-tableau .barre-boutons { zoom: 1.25; }
+    body.mode-tableau #reacteur {
+      width: 72px; height: 72px;
+      top: calc((clamp(28px, 3.6vh, 40px) + 19px) * 1.25);
+      left: calc((var(--tb-marge) + 29px) * 1.25);
+    }
+  }
+
+  @media (orientation: portrait) {
+    .tb-vedette { max-width: 100%; }
+    .tb-sigle { top: 36%; font-size: 40vw; }
+    .tb-coup-oeil { position: relative; right: auto; bottom: auto; width: auto; z-index: 1;
+      margin-top: 22px; flex-direction: row; flex-wrap: wrap; }
+    .tb-coup-oeil .tb-puce { flex: 1 1 calc(50% - 5px); }
+    .tb-suivi { flex-wrap: wrap; }
+    .tb-suivi > .tb-carte { flex: 1 1 calc(50% - 7px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tb-art { animation: none; }
+    .tableau.tb-entree .tb-vedette, .tableau.tb-entree .tb-carte,
+    .tableau.tb-entree .tb-puce, .tb-carte.tb-nouvelle { animation: none; }
+    .tb-carte, .tb-puce, .controle-bouton, #reacteur { transition: none; }
+  }
 
   @media (max-width: 700px) {
     .barre-boutons { right: 28px; top: 104px; }
     .controle-tiroir { top: 88px; right: 12px; bottom: 12px; width: calc(100vw - 24px); }
-    .tableau { top: 176px; left: 16px; right: 16px; bottom: 16px; }
   }
 </style>
 </head>
@@ -372,14 +588,37 @@
     <div class="date" id="vDate">—</div>
   </div>
 
-  <section class="tableau" id="tableau" aria-label="Tableau de bord" aria-hidden="true"></section>
+  <section class="tableau" id="tableau" aria-label="Tableau de bord" aria-hidden="true">
+    <div class="tb-banniere">
+      <div class="tb-art"></div>
+      <div class="tb-sigle" id="tbSigle" aria-hidden="true"></div>
+      <div class="tb-voile"></div>
+      <div class="tb-moi"><b id="tbSalut"></b><span id="tbDate"></span></div>
+      <div class="tb-vedette" id="tbVedette">
+        <div class="tb-sur" id="tbSur"></div>
+        <h1 class="tb-titre" id="tbTitre"></h1>
+        <div class="tb-meta" id="tbMeta"></div>
+        <div class="tb-ensuite" id="tbEnsuite"></div>
+      </div>
+      <div class="tb-coup-oeil" id="tbCoupOeil"></div>
+    </div>
+    <section class="tb-rangee" id="tbRangeeAvenir" hidden>
+      <h2>À venir <span id="tbAvenirInfo"></span></h2>
+      <div class="tb-rail" id="tbAvenir"></div>
+    </section>
+    <section class="tb-rangee" id="tbRangeeSuivi" hidden>
+      <h2>Réseaux et suivi <span id="tbSuiviInfo"></span></h2>
+      <div class="tb-rail tb-suivi" id="tbSuivi"></div>
+    </section>
+  </section>
 
   <div class="barre-boutons">
+    <div class="tb-heure" id="tbHeure" aria-hidden="true"></div>
     <button class="controle-bouton" id="basculerTableau" type="button" hidden
       aria-controls="tableau" aria-pressed="false"
-      title="Afficher ou masquer le tableau de bord au repos">▦ Tableau de bord</button>
+      title="Afficher ou masquer le tableau de bord"><span class="tb-icone" data-icone="tableau"></span><span class="libelle">Tableau de bord</span></button>
     <button class="controle-bouton" id="ouvrirControle" type="button"
-      aria-controls="controleTiroir" aria-expanded="false">⚙ Config</button>
+      aria-controls="controleTiroir" aria-expanded="false"><span class="tb-icone" data-icone="reglages"></span><span class="libelle">Config</span></button>
   </div>
   <aside class="controle-tiroir" id="controleTiroir" aria-hidden="true">
     <h2>Commandes rapides</h2>
@@ -481,6 +720,7 @@ let couleur = Object.assign({}, COULEURS.veille);  // couleur affichee, lissee
 // ------------------------------------------------------------- utilitaires
 
 const $ = (id) => document.getElementById(id);
+const VERSION_PAGE = (document.querySelector('meta[name="jarvis-version"]') || {}).content || "";
 const lerp = (a, b, t) => a + (b - a) * t;
 
 // ------------------------------------------------------------- controles rapides
@@ -608,7 +848,7 @@ function ouvrirFermerControles(force) {
   tiroir.classList.toggle("ouvert", ouvert);
   tiroir.setAttribute("aria-hidden", String(!ouvert));
   $("ouvrirControle").setAttribute("aria-expanded", String(ouvert));
-  $("ouvrirControle").textContent = ouvert ? "× Fermer" : "⚙ Config";
+  $("ouvrirControle").querySelector(".libelle").textContent = ouvert ? "Fermer" : "Config";
   if (ouvert) chargerControles();
 }
 
@@ -620,7 +860,6 @@ function ouvrirFermerControles(force) {
 const ETATS_REPOS = new Set(["veille", "muet"]);
 const DELAI_TABLEAU = 2000;
 const CLE_MASQUE = "jarvis.hud.tableauMasque";
-const ETATS_TUILE = new Set(["ok", "vide", "indisponible", "non_configure"]);
 
 function lireMasque() {
   try { return localStorage.getItem(CLE_MASQUE) === "1"; } catch (e) { return false; }
@@ -631,7 +870,8 @@ function ecrireMasque(v) {
 
 // masque : choix retenu de ne plus l'afficher au repos. force : demande du bouton,
 // valable jusqu'au prochain echange avec Jarvis (ecoute, reflexion, parole).
-const TB = { tuiles: [], masque: lireMasque(), force: false, visible: false, minuteur: 0 };
+const TB = { tuiles: [], masque: lireMasque(), force: false, visible: false, minuteur: 0,
+             fermerDetail: null };
 
 function tableauVoulu() {
   return TB.tuiles.length > 0 && (TB.force || (!TB.masque && ETATS_REPOS.has(S.etat)));
@@ -641,8 +881,18 @@ function appliquerModeTableau(actif) {
   $("basculerTableau").setAttribute("aria-pressed", String(actif));
   if (TB.visible === actif) return;
   TB.visible = actif;
+  const tableau = $("tableau");
+  if (actif) {
+    // Entree en cascade : banniere puis cartes, une a une.
+    tableau.classList.remove("tb-entree");
+    void tableau.offsetWidth;
+    tableau.classList.add("tb-entree");
+    rendreTableau();
+  } else {
+    fermerDetail();
+  }
   document.body.classList.toggle("mode-tableau", actif);
-  $("tableau").setAttribute("aria-hidden", String(!actif));
+  tableau.setAttribute("aria-hidden", String(!actif));
 }
 
 // immediat : affichage sans attente (clic sur le bouton). Sortir du repos masque
@@ -676,40 +926,590 @@ function elt(balise, classe, texte) {
   return e;
 }
 
-// Tout passe par textContent : un titre d'agenda ou un nom de salon reste du texte.
-function creerTuile(t) {
-  const etat = ETATS_TUILE.has(t.etat) ? t.etat : "ok";
-  const tuile = elt("article", "tuile " + etat);
-  tuile.dataset.id = String(t.id || "");
-  const tete = elt("div", "tuile-tete");
-  tete.append(elt("h3", "", t.titre || t.id || ""), elt("span", "maj", t.maj ? "maj " + t.maj : ""));
-  tuile.append(tete);
-  if (t.valeur) {
-    const chiffre = elt("div", "tuile-chiffre");
-    chiffre.append(elt("b", "", t.valeur), elt("span", "", t.legende || ""));
-    tuile.append(chiffre);
-  }
-  const lignes = Array.isArray(t.lignes) ? t.lignes : [];
-  if (lignes.length) {
-    const liste = elt("ul");
-    for (const l of lignes) {
-      const li = elt("li", l && l.alerte ? "alerte" : "");
-      li.append(elt("span", "texte", (l && l.texte) || ""), elt("span", "detail", (l && l.detail) || ""));
-      liste.append(li);
-    }
-    tuile.append(liste);
-  }
-  const message = t.message || (etat === "indisponible" ? "Indisponible pour le moment."
-    : etat === "non_configure" ? "Non configuré sur ce poste." : "");
-  if (message && (!lignes.length || etat !== "ok")) tuile.append(elt("p", "message", message));
-  return tuile;
-}
-
 function afficherTableau(tuiles) {
   TB.tuiles = Array.isArray(tuiles) ? tuiles.filter((t) => t && typeof t === "object") : [];
-  $("tableau").replaceChildren(...TB.tuiles.map(creerTuile));
+  rendreTableau();
   majModeTableau();
 }
+
+// ------------------------------------------------------------- tableau : rendu « Cinema »
+// Tout le texte des sources passe par textContent (un titre d'agenda ou un nom de
+// salon reste du texte) ; seules les icones constantes ci-dessous sont du SVG.
+
+const NF = new Intl.NumberFormat("fr-FR");
+const COMPACT = new Intl.NumberFormat("fr-FR", { notation: "compact", maximumSignificantDigits: 3 });
+const EUROS = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const ACCENTS = {
+  loopstr: ["#ff8a3d", "#e1306c"], agenda: ["#3cc8ff", "#5865f2"], jarvis: ["#3cc8ff", "#8134af"],
+  instagram: ["#e1306c"], discord: ["#5865f2"], factures: ["#46d369"],
+  meteo: ["#7fd3ff"], spotify: ["#1ed760"], colis: ["#ffb340"],
+};
+const ICONES = {
+  loopstr: '<path d="M6 12a6 6 0 0 1 10.2-4.3M18 12a6 6 0 0 1-10.2 4.3" stroke-linecap="round"/><path d="M16.5 4.5v3.4h-3.4M7.5 19.5v-3.4h3.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  agenda: '<rect x="4" y="5.5" width="16" height="14" rx="3.5"/><path d="M4 10h16M8.5 3.5v3.5M15.5 3.5v3.5" stroke-linecap="round"/>',
+  instagram: '<rect x="4" y="4" width="16" height="16" rx="5"/><circle cx="12" cy="12" r="3.6"/><circle cx="16.9" cy="7.1" r="1" fill="currentColor" stroke="none"/>',
+  discord: '<path d="M8.5 7.5c1.2-.5 2.3-.7 3.5-.7s2.3.2 3.5.7M8.2 16.6c1.2.6 2.5.9 3.8.9s2.6-.3 3.8-.9" stroke-linecap="round"/><path d="M7 7.6 5.6 9.8C4.8 12 4.6 14.2 5 16.4c.9.8 2 1.4 3.2 1.7l.9-1.6M17 7.6l1.4 2.2c.8 2.2 1 4.4.6 6.6-.9.8-2 1.4-3.2 1.7l-.9-1.6" stroke-linejoin="round"/><circle cx="9.6" cy="12.6" r="1.2" fill="currentColor" stroke="none"/><circle cx="14.4" cy="12.6" r="1.2" fill="currentColor" stroke="none"/>',
+  factures: '<path d="M7 3.5h10v17l-2.5-1.6-2.5 1.6-2.5-1.6L7 20.5z" stroke-linejoin="round"/><path d="M9.5 8h5M9.5 11.5h5M9.5 15h3" stroke-linecap="round"/>',
+  meteo: '<circle cx="9" cy="9" r="3.2"/><path d="M9 2.8v1.4M3 9h1.4M4.8 4.8l1 1M13.2 4.8l-1 1" stroke-linecap="round"/><path d="M8.5 19.5h8.2a3.3 3.3 0 0 0 .3-6.6 4.6 4.6 0 0 0-8.8 1.3 2.7 2.7 0 0 0 .3 5.3z" stroke-linejoin="round"/>',
+  spotify: '<path d="M9 18V6.5l10-2V16" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+  colis: '<path d="M12 3 4 7v10l8 4 8-4V7z" stroke-linejoin="round"/><path d="M4 7l8 4 8-4M12 11v10" stroke-linejoin="round"/>',
+  tableau: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
+  reglages: '<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4 18 18M6 18l1.6-1.6M16.4 7.6 18 6" stroke-linecap="round"/>',
+  fermer: '<path d="M6 6l12 12M18 6 6 18" stroke-linecap="round"/>',
+};
+
+function icone(nom) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 24 24");
+  s.setAttribute("fill", "none");
+  s.setAttribute("stroke", "currentColor");
+  s.setAttribute("stroke-width", "1.7");
+  s.setAttribute("aria-hidden", "true");
+  s.innerHTML = ICONES[nom] || ICONES.tableau;   // constantes ci-dessus, jamais une donnee
+  return s;
+}
+document.querySelectorAll(".tb-icone[data-icone]").forEach((e) => e.replaceWith(icone(e.dataset.icone)));
+
+function nombre(v) { return typeof v === "number" && isFinite(v) ? v : null; }
+function texte(v) { return v === undefined || v === null ? "" : String(v); }
+
+// ---- dates
+const JOURS_COURTS = ["Dim.", "Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam."];
+function minuit(d) { const m = new Date(d); m.setHours(0, 0, 0, 0); return m; }
+function quand(item, maintenant = new Date()) {
+  if (!item.debut) return { etiquette: texte(item.libelle), jourCourt: texte(item.libelle), num: "", rel: "", heure: "", proche: false };
+  const jours = Math.round((minuit(item.debut) - minuit(maintenant)) / 86400000);
+  const jourCourt = jours === 0 ? "Aujourd'hui" : jours === 1 ? "Demain" : JOURS_COURTS[item.debut.getDay()];
+  const etiquette = jours <= 1 ? jourCourt : `${jourCourt} ${item.debut.getDate()}`;
+  let rel;
+  if (item.toutJour) {
+    rel = jours <= 0 ? "aujourd'hui" : jours === 1 ? "demain" : `dans ${jours} jours`;
+  } else {
+    const min = Math.round((item.debut - maintenant) / 60000);
+    rel = min < 0 ? "en cours" : min < 60 ? `dans ${Math.max(1, min)} min`
+      : min < 1440 ? `dans ${Math.round(min / 60)} h` : `dans ${jours} jours`;
+  }
+  const heure = item.toutJour ? "" : item.debut.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return { etiquette, jourCourt, num: String(item.debut.getDate()), rel, heure, proche: jours <= 1, jours };
+}
+function salutation(d = new Date()) {
+  const h = d.getHours();
+  return h < 5 ? "Bonne nuit" : h < 12 ? "Bonjour" : h < 18 ? "Bon après-midi" : "Bonsoir";
+}
+function dateLongue(d = new Date()) {
+  const s = d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ---- chiffres animes (depuis la valeur deja affichee)
+function compter(e, cible, format, depuis) {
+  if (depuis === null || depuis === undefined || depuis === cible ||
+      matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    e.textContent = format(cible);
+    return;
+  }
+  const t0 = performance.now(), duree = 900;
+  const pas = (t) => {
+    const k = Math.min(1, (t - t0) / duree), ease = 1 - Math.pow(1 - k, 3);
+    e.textContent = format(Math.round(depuis + (cible - depuis) * ease));
+    if (k < 1) requestAnimationFrame(pas);
+  };
+  requestAnimationFrame(pas);
+}
+// Valeur memorisee par carte : une mise a jour anime de l'ancienne a la nouvelle.
+function chiffre(carte, nom, cible, format, classe = "tb-grand") {
+  const e = elt("div", classe);
+  carte._valeurs = carte._valeurs || {};
+  const avant = carte._valeurs[nom];
+  compter(e, cible, format, avant === undefined ? 0 : avant);
+  carte._valeurs[nom] = cible;
+  return e;
+}
+
+// ---- courbe : une serie, tracee a la taille reelle de sa boite
+function courbe(valeurs, libelle) {
+  const NS = "http://www.w3.org/2000/svg";
+  const boite = elt("div", "tb-courbe");
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", libelle);
+  const forme = (nom, classe) => { const f = document.createElementNS(NS, nom); f.setAttribute("class", classe); return f; };
+  const aire = forme("polygon", "aire"), ligne = forme("polyline", "ligne");
+  const repere = forme("line", "repere"), point = forme("circle", "point");
+  point.setAttribute("r", 4);
+  svg.append(aire, ligne, repere, point);
+  const bulle = elt("div", "bulle");
+  boite.append(svg, bulle);
+  const min = Math.min(...valeurs), max = Math.max(...valeurs), pad = 6;
+  let x = () => 0;
+  const tracer = () => {
+    const L = boite.clientWidth, H = boite.clientHeight;
+    if (!L || !H) return;
+    svg.setAttribute("viewBox", `0 0 ${L} ${H}`);
+    x = (i) => pad + (i / (valeurs.length - 1)) * (L - pad * 2);
+    const y = (v) => H - pad - ((v - min) / Math.max(1, max - min)) * (H - pad * 2);
+    const pts = valeurs.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    aire.setAttribute("points", `${x(0)},${H} ${pts} ${x(valeurs.length - 1)},${H}`);
+    ligne.setAttribute("points", pts);
+    point.setAttribute("cx", x(valeurs.length - 1));
+    point.setAttribute("cy", y(valeurs[valeurs.length - 1]));
+    repere.setAttribute("y1", 0);
+    repere.setAttribute("y2", H);
+  };
+  boite._ro = new ResizeObserver(tracer);
+  boite._ro.observe(boite);
+  boite.addEventListener("mousemove", (e) => {
+    const r = boite.getBoundingClientRect();
+    const i = Math.max(0, Math.min(valeurs.length - 1,
+      Math.round(((e.clientX - r.left - pad) / Math.max(1, r.width - pad * 2)) * (valeurs.length - 1))));
+    repere.setAttribute("x1", x(i));
+    repere.setAttribute("x2", x(i));
+    boite.classList.add("active");
+    const jour = i === valeurs.length - 1 ? "Aujourd'hui" : "J−" + (valeurs.length - 1 - i);
+    bulle.textContent = `${jour} · ${NF.format(valeurs[i])}`;
+    bulle.style.left = `${x(i)}px`;
+  });
+  boite.addEventListener("mouseleave", () => boite.classList.remove("active"));
+  return boite;
+}
+
+// ---- ce qui arrive : echeances Loopstr et rendez-vous de l'agenda, du plus proche
+function elementsAvenir(parId) {
+  const items = [];
+  const lp = parId.loopstr, ag = parId.agenda;
+  const echeances = lp && lp.donnees && Array.isArray(lp.donnees.echeances) ? lp.donnees.echeances : null;
+  if (echeances) {
+    for (const e of echeances) {
+      const d = new Date(e.debut);
+      if (!isNaN(d)) items.push({ source: "loopstr", debut: d, toutJour: /T00:00(:00)?/.test(texte(e.debut)),
+                                  marque: texte(e.marque), tache: texte(e.tache) });
+    }
+  } else if (lp && lp.etat === "ok") {   // fenetre recente, serveur ancien : le resume suffit
+    for (const l of lp.lignes || []) items.push({ source: "loopstr", libelle: l.detail, marque: texte(l.texte), tache: "" });
+  }
+  const evts = ag && ag.donnees && Array.isArray(ag.donnees.evenements) ? ag.donnees.evenements : null;
+  if (evts) {
+    for (const e of evts) {
+      const d = new Date(e.debut);
+      if (!isNaN(d)) items.push({ source: "agenda", debut: d, toutJour: !!e.tout_jour, marque: texte(e.titre), tache: "" });
+    }
+  } else if (ag && ag.etat === "ok") {
+    for (const l of ag.lignes || []) items.push({ source: "agenda", libelle: l.detail, marque: texte(l.texte), tache: "" });
+  }
+  const t = (it) => (it.debut ? it.debut.getTime() : Infinity);
+  return items.map((it, i) => [it, i])
+    .sort((a, b) => (t(a[0]) - t(b[0])) || (a[1] - b[1]))
+    .map((x) => x[0]);
+}
+
+function sigle(nom) {
+  const mots = texte(nom).replace(/[^\p{L}\p{N}\s]/gu, " ").trim().split(/\s+/).filter(Boolean);
+  if (!mots.length) return "J";
+  return (mots.length > 1 ? mots[0][0] + mots[1][0] : mots[0].slice(0, 2)).toUpperCase();
+}
+
+function libelleItem(it) { return it.tache ? `${it.tache} ${it.marque}` : it.marque; }
+
+function rendreVedette(items, parId) {
+  const hero = items[0];
+  const [accent, accent2] = ACCENTS[hero ? hero.source : "jarvis"];
+  const tableau = $("tableau");
+  tableau.style.setProperty("--tb-accent", accent);
+  tableau.style.setProperty("--tb-accent-2", accent2 || accent);
+  const sur = $("tbSur"), meta = $("tbMeta"), ensuite = $("tbEnsuite"), titre = $("tbTitre");
+  sur.replaceChildren();
+  meta.replaceChildren();
+  ensuite.replaceChildren();
+  let t;
+  if (hero) {
+    const q = quand(hero);
+    sur.append(icone(hero.source), document.createTextNode(hero.source === "agenda" ? "Agenda · à venir" : "Loopstr · à venir"));
+    t = libelleItem(hero);
+    $("tbSigle").textContent = sigle(hero.marque);
+    meta.append(elt("span", "tb-etiquette", q.etiquette || "Bientôt"));
+    const infos = [];
+    if (q.heure) infos.push(q.heure);
+    if (q.rel && q.rel !== q.etiquette.toLowerCase()) infos.push(q.rel);
+    if (hero.debut) {
+      const meme = items.filter((i) => i.debut && minuit(i.debut).getTime() === minuit(hero.debut).getTime()).length;
+      if (meme > 1) infos.push(`${meme} au programme ${q.jours <= 1 ? q.etiquette.toLowerCase() : "ce jour-là"}`);
+    }
+    if (infos.length) meta.append(elt("span", "", infos.join(" · ")));
+    const suite = items.slice(1, 3);
+    if (suite.length) {
+      ensuite.append(document.createTextNode("Ensuite : "));
+      suite.forEach((it, k) => {
+        if (k) ensuite.append(document.createTextNode(" · "));
+        ensuite.append(elt("b", "", it.marque));
+        if (it.tache) ensuite.append(document.createTextNode(" " + it.tache.toLowerCase()));
+      });
+    }
+  } else {
+    // Rien d'annonce : la banniere reste calme et dit pourquoi.
+    sur.append(icone("tableau"), document.createTextNode("Jarvis"));
+    t = "Rien à l'horizon";
+    $("tbSigle").textContent = "J";
+    const sources = [parId.loopstr, parId.agenda].filter(Boolean);
+    const lisible = sources.some((x) => x.etat === "ok" || x.etat === "vide");
+    const enPanne = sources.some((x) => x.etat === "indisponible");
+    meta.append(elt("span", "", lisible ? "Aucune échéance ni rendez-vous ces 14 prochains jours."
+      : enPanne ? "Loopstr et l'agenda ne répondent pas pour le moment."
+      : "Relie Loopstr ou Google Agenda pour voir ce qui arrive."));
+  }
+  titre.textContent = t;
+  titre.classList.toggle("long", t.length > 26);
+}
+
+function rendreCoupOeil(parId) {
+  const puces = [];
+  const m = parId.meteo, s = parId.spotify, c = parId.colis;
+  if (m && m.etat === "ok" && m.donnees) {
+    const d = m.donnees;
+    const bas = [texte(d.lieu), nombre(d.min) !== null ? `${d.min}° / ${d.max}°` : "",
+                 nombre(d.pluie) !== null ? `pluie ${d.pluie} %` : ""].filter(Boolean).join(" · ");
+    puces.push(["meteo", `${d.temperature}° · ${texte(d.ciel)}`, bas]);
+  }
+  if (s && s.etat === "ok" && s.donnees) {
+    const d = s.donnees;
+    puces.push(["spotify", texte(d.titre), [texte(d.artistes), d.lecture ? "" : "en pause"].filter(Boolean).join(" · ")]);
+  }
+  if (c && c.etat === "ok" && c.donnees && Array.isArray(c.donnees.colis) && c.donnees.colis.length) {
+    const l = c.donnees.colis, p = l[0];
+    puces.push(["colis", `${l.length} colis en route`, `${texte(p.marchand)} ${texte(p.libelle)}`]);
+  }
+  const zone = $("tbCoupOeil");
+  zone.replaceChildren(...puces.map(([source, haut, bas], i) => {
+    const p = elt("div", "tb-puce");
+    p.style.setProperty("--accent", ACCENTS[source][0]);
+    p.style.setProperty("--i", i);
+    const txt = elt("div");
+    txt.append(elt("b", "", haut), elt("span", "", bas));
+    p.append(icone(source), txt);
+    return p;
+  }));
+  return new Set(puces.map((p) => p[0]));
+}
+
+// ---- cartes, mises a jour en place (cle stable : pas de reconstruction, pas de clignotement)
+function reconcilier(rail, cartes) {
+  const anciennes = new Map([...rail.children].map((c) => [c.dataset.cle, c]));
+  cartes.forEach((c, i) => {
+    let carte = anciennes.get(c.cle);
+    const nouvelle = !carte;
+    if (nouvelle) {
+      carte = elt("article");
+      carte.dataset.cle = c.cle;
+    }
+    anciennes.delete(c.cle);
+    carte.className = "tb-carte " + c.classe + (nouvelle && TB.visible ? " tb-nouvelle" : "");
+    carte.style.setProperty("--i", i);
+    carte.style.setProperty("--accent", c.accent);
+    carte.querySelectorAll(".tb-courbe").forEach((k) => k._ro && k._ro.disconnect());
+    carte.replaceChildren();
+    c.remplir(carte);
+    if (c.ouvrir) {
+      carte.tabIndex = 0;
+      carte.setAttribute("role", "button");
+      carte.setAttribute("aria-label", c.libelle || "");
+      carte.onclick = () => c.ouvrir(carte);
+    } else {
+      carte.removeAttribute("tabindex");
+      carte.removeAttribute("role");
+      carte.removeAttribute("aria-label");
+      carte.onclick = null;
+    }
+    rail.append(carte);
+  });
+  anciennes.forEach((carte) => carte.remove());
+}
+
+function tete(source, titre, aside) {
+  const t = elt("div", "tb-tete");
+  t.append(icone(source), document.createTextNode(titre));
+  if (aside) t.append(elt("span", "aside", aside));
+  return t;
+}
+
+function cartesAvenir(items) {
+  const rail = $("tbAvenir");
+  const reste = items.slice(1);
+  $("tbRangeeAvenir").hidden = false;                // mesurable
+  const largeur = rail.clientWidth || (innerWidth - 120);
+  const place = Math.max(1, Math.floor((largeur + 14) / (250 + 14)));
+  const visibles = reste.length > place ? reste.slice(0, place - 1) : reste;
+  // Peu d'affiches : elles se partagent toute la largeur (jamais de grand vide).
+  const colonnes = Math.max(1, Math.min(place, reste.length));
+  rail.style.setProperty("--tb-place", `calc((100% - ${(colonnes - 1) * 14}px) / ${colonnes})`);
+  const cartes = visibles.map((it) => {
+    const q = quand(it);
+    return {
+      cle: `avenir:${it.source}:${it.debut ? it.debut.getTime() : ""}:${it.marque}:${it.tache}`,
+      classe: "tb-affiche", accent: ACCENTS[it.source][0], libelle: `${libelleItem(it)}, ${q.etiquette}`,
+      remplir: (carte) => {
+        const d = elt("div", "tb-date" + (q.proche ? " proche" : ""));
+        if (q.num) d.append(elt("b", "", q.num));
+        d.append(elt("span", "", q.jourCourt));
+        carte.append(d, elt("div", "tb-marque", it.marque),
+          elt("div", "tb-tache", it.tache || q.heure || (it.source === "agenda" ? "Toute la journée" : "")),
+          elt("div", "tb-plus", [q.rel, it.source === "agenda" ? "Agenda" : "Loopstr"].filter(Boolean).join(" · ")));
+      },
+      ouvrir: (carte) => detailAvenir(carte, items),
+    };
+  });
+  if (reste.length > visibles.length) {
+    const n = reste.length - visibles.length;
+    cartes.push({
+      cle: "avenir:autres", classe: "tb-affiche tb-autres", accent: ACCENTS.loopstr[0],
+      libelle: `${n} autres à venir`,
+      remplir: (carte) => carte.append(elt("b", "", `+${n}`), elt("span", "", n > 1 ? "autres à venir" : "autre à venir")),
+      ouvrir: (carte) => detailAvenir(carte, items),
+    });
+  }
+  reconcilier(rail, cartes);
+  $("tbRangeeAvenir").hidden = cartes.length === 0;
+  $("tbAvenirInfo").textContent = reste.length ? `${items.length} sur 14 jours` : "";
+}
+
+function deltaTexte(c) {
+  const d = nombre(c.delta);
+  if (d === null) return null;
+  const e = elt("div", "tb-delta " + (d > 0 ? "haut" : d < 0 ? "bas" : ""),
+    (d > 0 ? "▲ +" : d < 0 ? "▼ −" : "= ") + NF.format(Math.abs(d)));
+  if (c.depuis) e.append(elt("small", "", c.depuis));
+  return e;
+}
+
+function cartesSuivi(parId, prises) {
+  const cartes = [], etats = [];
+  const connus = new Set(["agenda", "loopstr", "instagram", "discord", "factures", "meteo", "spotify", "colis"]);
+  for (const t of TB.tuiles) {
+    const id = texte(t.id);
+    if (t.etat === "non_configure" || t.etat === "indisponible") {
+      etats.push({ titre: texte(t.titre || id), message: texte(t.message) || (t.etat === "indisponible"
+        ? "Indisponible pour le moment." : "Non configuré sur ce poste."), classe: t.etat === "indisponible" ? "ko" : "" });
+      continue;
+    }
+    if (id === "loopstr" || id === "agenda" || prises.has(id)) continue;
+    const d = t.donnees;
+    if (id === "instagram" && d && Array.isArray(d.comptes)) {
+      for (const c of d.comptes.slice(0, 3)) {
+        if (c.erreur || nombre(c.abonnes) === null) {
+          etats.push({ titre: "Instagram", message: `@${texte(c.compte)} : lecture impossible.`, classe: "ko" });
+          continue;
+        }
+        cartes.push({
+          cle: "insta:" + c.compte, classe: "tb-insta", accent: ACCENTS.instagram[0],
+          libelle: `Instagram @${c.compte}`,
+          remplir: (carte) => {
+            const ligne = elt("div", "tb-ligne-stat");
+            ligne.append(chiffre(carte, "abonnes", c.abonnes, (n) => COMPACT.format(n)));
+            const dt = deltaTexte(c);
+            if (dt) ligne.append(dt);
+            carte.append(tete("instagram", "Instagram", Array.isArray(c.serie) && c.serie.length > 1 ? `${c.serie.length} relevés` : ""),
+              elt("div", "tb-id", "@" + c.compte), ligne);
+            if (Array.isArray(c.serie) && c.serie.length > 1) carte.append(courbe(c.serie, `Abonnés de @${c.compte}`));
+          },
+          ouvrir: (carte) => detailInstagram(carte, d.comptes),
+        });
+      }
+    } else if (id === "discord" && d && nombre(d.mentions) !== null) {
+      const serveurs = Array.isArray(d.serveurs) ? d.serveurs : [];
+      cartes.push({
+        cle: "discord", classe: "tb-discord", accent: ACCENTS.discord[0], libelle: "Discord",
+        remplir: (carte) => {
+          const m = elt("div", "tb-mentions");
+          m.append(chiffre(carte, "mentions", d.mentions, (n) => NF.format(n)),
+            elt("small", "", `mention${d.mentions > 1 ? "s" : ""} · ${NF.format(d.messages || 0)} messages`));
+          const liste = elt("ul", "tb-liste");
+          serveurs.flatMap((s) => s.salons || []).slice(0, 3).forEach((s) => {
+            const li = elt("li");
+            li.append(elt("span", "salon", texte(s.nom)), elt("span", "", NF.format(s.messages || 0)));
+            liste.append(li);
+          });
+          carte.append(tete("discord", "Discord", serveurs.length === 1 ? texte(serveurs[0].nom)
+            : serveurs.length ? `${serveurs.length} serveurs` : "24 h"), m, liste);
+        },
+        ouvrir: (carte) => detailDiscord(carte, d),
+      });
+    } else if (id === "factures" && d) {
+      const imp = d.impayees || {}, ret = d.retard || {};
+      const montant = nombre(imp.montant) !== null ? imp.montant : nombre(ret.montant);
+      cartes.push({
+        cle: "factures", classe: "tb-factures", accent: ACCENTS.factures[0], libelle: "Factures",
+        remplir: (carte) => {
+          const ligne = elt("div", "tb-ligne-stat");
+          ligne.append(chiffre(carte, "montant", montant || 0, (n) => EUROS.format(n)),
+            elt("div", "tb-delta", d.aucun ? "rien à encaisser" : "à encaisser"));
+          const liste = elt("ul", "tb-liste");
+          if (d.retard) {
+            const li = elt("li", "alerte");
+            li.append(elt("span", "", `${ret.nombre ?? ""} en retard`.trim()), elt("span", "", nombre(ret.montant) !== null ? EUROS.format(ret.montant) : ""));
+            liste.append(li);
+          }
+          if (d.impayees) {
+            const li = elt("li");
+            li.append(elt("span", "", `${imp.nombre ?? ""} impayée${(imp.nombre || 0) > 1 ? "s" : ""}`.trim()), elt("span", "", nombre(imp.montant) !== null ? EUROS.format(imp.montant) : ""));
+            liste.append(li);
+          }
+          carte.append(tete("factures", "Factures", "facture.net"), ligne, liste);
+        },
+        ouvrir: null,
+      });
+    } else if (t.etat === "vide") {
+      etats.push({ titre: texte(t.titre || id), message: texte(t.message) || "Rien à signaler.", classe: "ok" });
+    } else if (t.etat === "ok" && (!connus.has(id) || !d)) {
+      // Source sans affichage dedie (ou serveur ancien) : resume generique.
+      cartes.push({
+        cle: "gen:" + id, classe: "tb-generique", accent: (ACCENTS[id] || ACCENTS.jarvis)[0], libelle: texte(t.titre),
+        remplir: (carte) => {
+          carte.append(tete(ICONES[id] ? id : "tableau", texte(t.titre || id), texte(t.legende)));
+          if (t.valeur) carte.append(elt("div", "tb-grand", texte(t.valeur)));
+          const liste = elt("ul", "tb-liste");
+          (t.lignes || []).slice(0, 3).forEach((l) => {
+            const li = elt("li", l && l.alerte ? "alerte" : "");
+            li.append(elt("span", "", texte(l && l.texte)), elt("span", "", texte(l && l.detail)));
+            liste.append(li);
+          });
+          carte.append(liste);
+        },
+        ouvrir: null,
+      });
+    }
+  }
+  const rail = $("tbSuivi");
+  $("tbRangeeSuivi").hidden = false;                 // mesurable
+  const portrait = innerHeight > innerWidth;
+  const largeur = rail.clientWidth || (innerWidth - 120);
+  const max = portrait ? 6 : Math.max(2, Math.floor((largeur + 14) / (300 + 14)));
+  const place = Math.max(1, max - (etats.length ? 1 : 0));
+  const gardees = cartes.slice(0, place);
+  if (etats.length) {
+    gardees.push({
+      cle: "etat", classe: "tb-etat", accent: "#fff", libelle: "Sources",
+      remplir: (carte) => {
+        const liste = elt("ul", "tb-liste");
+        const max = gardees.length > 1 ? 4 : 8;      // seule, la carte a la place
+        etats.slice(0, max).forEach((e) => {
+          const li = elt("li", e.classe);
+          li.append(elt("i"), elt("b", "", e.titre), document.createTextNode(" · " + e.message));
+          liste.append(li);
+        });
+        carte.append(tete("tableau", "Sources", etats.length > max ? `+${etats.length - max}` : ""), liste);
+      },
+      ouvrir: null,
+    });
+  }
+  reconcilier(rail, gardees);
+  $("tbRangeeSuivi").hidden = gardees.length === 0;
+  $("tbSuiviInfo").textContent = gardees.length ? `mis à jour à ${texte((TB.tuiles[0] || {}).maj)}` : "";
+}
+
+function rendreTableau() {
+  const parId = {};
+  for (const t of TB.tuiles) parId[texte(t.id)] = t;
+  const items = elementsAvenir(parId);
+  rendreVedette(items, parId);
+  const prises = rendreCoupOeil(parId);
+  cartesAvenir(items);
+  cartesSuivi(parId, prises);
+}
+
+// ---- vue detaillee : la carte s'agrandit (FLIP) ; Echap ou clic a cote referme
+function ouvrirDetail(carte, accent, titre, chapo, corps) {
+  fermerDetail();
+  const depart = carte.getBoundingClientRect();
+  const fond = elt("div", "tb-fond");
+  const panneau = elt("div", "tb-detail");
+  panneau.setAttribute("role", "dialog");
+  panneau.setAttribute("aria-label", titre);
+  panneau.style.setProperty("--accent", accent);
+  const entete = elt("div", "tete-d");
+  entete.append(elt("h2", "", titre), elt("p", "chapo", chapo));
+  const contenu = elt("div", "corps");
+  contenu.append(...corps);
+  const fermer = elt("button", "tb-fermer");
+  fermer.type = "button";
+  fermer.setAttribute("aria-label", "Fermer");
+  fermer.append(icone("fermer"));
+  panneau.append(entete, contenu, fermer);
+  document.body.append(fond, panneau);
+  const fin = panneau.getBoundingClientRect();
+  const dx = depart.left - fin.left, dy = depart.top - fin.top;
+  const sx = depart.width / fin.width, sy = depart.height / fin.height;
+  const reduit = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const opts = { duration: reduit ? 1 : 420, easing: "cubic-bezier(.2,.8,.2,1)", fill: "both" };
+  panneau.animate([{ transform: `translate(${dx}px,${dy}px) scale(${sx},${sy})`, opacity: .6 },
+                   { transform: "none", opacity: 1 }], opts);
+  fond.animate([{ opacity: 0 }, { opacity: 1 }], opts);
+  carte.classList.add("ouverte");
+  fermer.focus({ preventScroll: true });
+  const sortir = () => {
+    document.removeEventListener("keydown", clavier);
+    TB.fermerDetail = null;
+    const f = { ...opts, duration: reduit ? 1 : 300 };
+    const a = panneau.animate([{ transform: "none", opacity: 1 },
+      { transform: `translate(${dx}px,${dy}px) scale(${sx},${sy})`, opacity: 0 }], f);
+    fond.animate([{ opacity: 1 }, { opacity: 0 }], f);
+    a.onfinish = () => { panneau.remove(); fond.remove(); carte.classList.remove("ouverte"); };
+  };
+  const clavier = (e) => { if (e.key === "Escape") sortir(); };
+  document.addEventListener("keydown", clavier);
+  fond.addEventListener("click", sortir);
+  fermer.addEventListener("click", sortir);
+  TB.fermerDetail = sortir;
+}
+function fermerDetail() { if (TB.fermerDetail) TB.fermerDetail(); }
+
+function detailAvenir(carte, items) {
+  const lignes = items.map((it) => {
+    const q = quand(it);
+    const l = elt("div", "ligne-d");
+    const nom = elt("span");
+    nom.append(elt("b", "", it.marque));
+    if (it.tache) nom.append(document.createTextNode(" · " + it.tache));
+    const rel = q.rel && q.rel !== q.etiquette.toLowerCase() ? q.rel : "";
+    l.append(elt("span", "", [q.etiquette, q.heure].filter(Boolean).join(" · ")), nom,
+      elt("span", "muet", [rel, it.source === "agenda" ? "Agenda" : "Loopstr"].filter(Boolean).join(" · ")));
+    return l;
+  });
+  ouvrirDetail(carte, ACCENTS.loopstr[0], "À venir", `${items.length} échéance${items.length > 1 ? "s" : ""} et rendez-vous sur 14 jours`, lignes);
+}
+function detailInstagram(carte, comptes) {
+  const corps = [];
+  for (const c of comptes) {
+    if (nombre(c.abonnes) === null) continue;
+    const dt = nombre(c.delta);
+    corps.push(elt("div", "tb-id", `@${texte(c.compte)} · ${NF.format(c.abonnes)} abonnés`
+      + (dt !== null ? ` · ${dt >= 0 ? "+" : "−"}${NF.format(Math.abs(dt))} depuis ${texte(c.depuis)}` : "")));
+    if (Array.isArray(c.serie) && c.serie.length > 1) corps.push(courbe(c.serie, `Abonnés de @${c.compte}`));
+  }
+  ouvrirDetail(carte, ACCENTS.instagram[0], "Instagram", "Abonnés, relevé par relevé", corps);
+}
+function detailDiscord(carte, d) {
+  const corps = [];
+  for (const s of d.serveurs || []) {
+    corps.push(elt("div", "tb-id", texte(s.nom)));
+    for (const salon of s.salons || []) {
+      const l = elt("div", "ligne-d");
+      l.append(elt("span", "muet", "#"), elt("span", "", texte(salon.nom)), elt("span", "", `${NF.format(salon.messages || 0)} messages`));
+      corps.push(l);
+    }
+  }
+  ouvrirDetail(carte, ACCENTS.discord[0], "Discord",
+    `${NF.format(d.mentions)} mention${d.mentions > 1 ? "s" : ""} · ${NF.format(d.messages || 0)} messages en 24 h · ${NF.format(d.salons || 0)} salons actifs`, corps);
+}
+
+// Clavier : Entree ou Espace ouvre la carte qui a le focus.
+$("tableau").addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches(".tb-carte[role=button]")) {
+    e.preventDefault();
+    e.target.click();
+  }
+});
+let tbRedim = 0;
+window.addEventListener("resize", () => { clearTimeout(tbRedim); tbRedim = setTimeout(rendreTableau, 150); });
+// Les durees relatives (« dans 3 h ») avancent avec le temps.
+setInterval(() => { if (TB.visible) rendreTableau(); }, 60000);
 
 function versCouleur(cible, t) {
   couleur.r = lerp(couleur.r, cible.r, t);
@@ -948,6 +1748,9 @@ function majHorloge() {
   $("vHeure").textContent = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   $("vDate").textContent =
     `${JOURS[d.getDay()]} ${d.getDate()} ${MOIS[d.getMonth()]} ${d.getFullYear()}`;
+  $("tbHeure").textContent = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  $("tbSalut").textContent = salutation(d);
+  $("tbDate").textContent = dateLongue(d);
 }
 
 // ------------------------------------------------------------- evenements
@@ -962,6 +1765,10 @@ function appliquer(ev) {
       break;
     case "tableau":
       afficherTableau(ev.tuiles);
+      break;
+    case "version":
+      // Page mise a jour sur le disque : la fenetre se recharge d'elle-meme.
+      if (ev.v && /^[0-9a-f]{12}$/.test(VERSION_PAGE) && ev.v !== VERSION_PAGE) location.reload();
       break;
     case "niveau":
       S.niveauCible = ev.v;
@@ -1036,17 +1843,23 @@ function demonstration() {
   appliquer({ t: "config", modele: "qwen2.5:7b (demo)", stt: "whisper medium" });
   appliquer({ t: "demo", v: true });
   // Tuiles factices : aucune donnee reelle.
+  const p2 = (n) => String(n).padStart(2, "0");
+  const jour = (n) => {           // date locale « toute la journee », comme le serveur
+    const d = minuit(new Date()); d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T00:00:00`;
+  };
   appliquer({ t: "tableau", tuiles: [
-    { id: "agenda", titre: "Agenda", etat: "ok", maj: "09:30", valeur: "2", legende: "aujourd'hui",
-      lignes: [{ texte: "Point equipe", detail: "aujourd'hui · 14h", alerte: true },
-               { texte: "Dentiste", detail: "jeu. 23 · 9h" }] },
-    { id: "factures", titre: "Factures", etat: "ok", maj: "09:00", valeur: "1 250 €",
-      legende: "à encaisser", lignes: [{ texte: "1 facture en retard", detail: "400 €", alerte: true },
-                                       { texte: "3 factures impayées", detail: "1 250 €" }] },
-    { id: "loopstr", titre: "Loopstr", etat: "ok", maj: "09:15", valeur: "1", legende: "sur 7 jours",
-      lignes: [{ texte: "Marque A - publication", detail: "demain", alerte: true }] },
-    { id: "instagram", titre: "Instagram", etat: "ok", maj: "09:00", valeur: "+18", legende: "abonnés",
-      lignes: [{ texte: "@compte_demo", detail: "4210 abonnés · +18 depuis hier" }] },
+    { id: "agenda", titre: "Agenda", etat: "ok", maj: "09:30", donnees: { evenements: [
+      { debut: new Date(Date.now() + 3 * 3600e3).toISOString(), tout_jour: false, titre: "Point d'équipe" }] } },
+    { id: "factures", titre: "Factures", etat: "ok", maj: "09:00", donnees: {
+      impayees: { nombre: 3, montant: 1250 }, retard: { nombre: 1, montant: 400 }, aucun: false } },
+    { id: "loopstr", titre: "Loopstr", etat: "ok", maj: "09:15", donnees: { echeances: [
+      { debut: jour(1), marque: "Marque A", tache: "Publication" },
+      { debut: jour(2), marque: "Marque B", tache: "Brief" },
+      { debut: jour(3), marque: "Marque C", tache: "Script" }] } },
+    { id: "instagram", titre: "Instagram", etat: "ok", maj: "09:00", donnees: { comptes: [
+      { compte: "compte_demo", abonnes: 4210, delta: 18, depuis: "hier",
+        serie: [4100, 4120, 4131, 4150, 4149, 4170, 4192, 4210] }] } },
     { id: "discord", titre: "Discord", etat: "non_configure", maj: "09:00",
       message: "Bot Discord non configuré." },
   ] });

@@ -224,6 +224,24 @@ class FacturesTests(unittest.TestCase):
         self.assertEqual(json.loads(sortie.getvalue()), {"etat": "erreur", "type": "url"})
 
 
+class DonneesStructureesTests(unittest.TestCase):
+    def test_noms_sans_emoji_decoratif(self):
+        self.assertEqual(tdb._propre("💬・général"), "général")
+        self.assertEqual(tdb._propre("🐀Serveur démo"), "Serveur démo")
+        self.assertEqual(tdb._propre("👍🏽 #annonces"), "#annonces")
+        self.assertEqual(tdb._marque_tache("🚀 Marque A — Publication"), ("Marque A", "Publication"))
+        self.assertEqual(tdb._marque_tache("✍️ Marque-B - Script"), ("Marque-B", "Script"))
+        self.assertEqual(tdb._marque_tache("Tournage libre"), ("Tournage libre", ""))
+
+    def test_donnees_transmises_par_l_assembleur(self):
+        a = _assembleur([_source("meteo", lambda: {"valeur": "12°", "donnees": {"temperature": 12}}),
+                         _source("agenda", lambda: {"valeur": "1", "donnees": "pas un dict"})])
+        a.rafraichir()
+        meteo, agenda = a.tuiles()
+        self.assertEqual(meteo["donnees"], {"temperature": 12})
+        self.assertNotIn("donnees", agenda)
+
+
 class SourcesTests(unittest.TestCase):
     def test_agenda_ne_lance_jamais_l_autorisation_interactive(self):
         with patch("tools.agenda._SERVICE", None), \
@@ -269,6 +287,10 @@ class SourcesTests(unittest.TestCase):
         self.assertTrue(tuile["lignes"][0]["alerte"])
         self.assertEqual(tuile["lignes"][1]["detail"], "ven. 23")
         self.assertFalse(tuile["lignes"][1]["alerte"])
+        premiere = tuile["donnees"]["echeances"][0]
+        self.assertEqual((premiere["marque"], premiere["tache"]), ("Marque A", "publication"))
+        self.assertTrue(premiere["debut"].startswith("2026-10-20"))
+        self.assertEqual(len(tuile["donnees"]["echeances"]), 3)
 
     def test_tuile_instagram_lit_sans_ecrire_l_historique(self):
         comptes = [{"nom": "principal", "user_id": "1", "token": "JETON-FACTICE"}]
@@ -286,6 +308,10 @@ class SourcesTests(unittest.TestCase):
         self.assertEqual(tuile["lignes"][0]["texte"], "@compte_demo")
         self.assertIn("+18 depuis hier", tuile["lignes"][0]["detail"])
         self.assertNotIn("JETON", json.dumps(tuile))
+        fiche = tuile["donnees"]["comptes"][0]
+        self.assertEqual((fiche["compte"], fiche["abonnes"], fiche["delta"], fiche["depuis"]),
+                         ("compte_demo", 4210, 18, "hier"))
+        self.assertEqual(fiche["serie"], [4192, 4210])     # releves passes + valeur du jour
 
     def test_instagram_en_echec_reste_sans_secret(self):
         comptes = [{"nom": "principal", "user_id": "1", "token": "JETON-FACTICE"}]
@@ -300,13 +326,17 @@ class SourcesTests(unittest.TestCase):
 
     def test_tuile_discord_sans_contenu_de_message(self):
         stats = {"messages": 42, "salons": 3, "mentions": 2,
-                 "actifs": [{"serveur": "Serveur demo", "salon": "general", "messages": 30}]}
+                 "actifs": [{"serveur": "🐀Serveur demo", "salon": "💬・general", "messages": 30},
+                            {"serveur": "🐀Serveur demo", "salon": "debats", "messages": 9}]}
         with patch("tools.discord_bot._configure", return_value=True), \
                 patch("tools.discord_bot.digest_journal", return_value=(stats, None)):
             tuile = tdb.source_discord()
         self.assertEqual(tuile["valeur"], "2")
         self.assertEqual(tuile["lignes"][0]["texte"], "42 messages")
         self.assertEqual(tuile["lignes"][1]["texte"], "#general")
+        self.assertEqual(tuile["donnees"]["serveurs"], [{"nom": "Serveur demo", "salons": [
+            {"nom": "general", "messages": 30}, {"nom": "debats", "messages": 9}]}])
+        self.assertEqual(tuile["donnees"]["mentions"], 2)
 
     def test_tuile_colis(self):
         en_cours = [{"marchand": "Boutique demo", "etape": "livraison"},
@@ -384,6 +414,23 @@ class HudTableauTests(unittest.TestCase):
             serveur.server_close()
         self.assertEqual(evenements[-1], {"t": "tableau", "tuiles": [
             {"id": "agenda", "titre": "Agenda", "etat": "ok"}]})
+        self.assertEqual(evenements[0], {"t": "version", "v": hud._version_page()})
+
+    def test_la_page_porte_la_version_annoncee_par_le_flux(self):
+        serveur = hud._Serveur(("127.0.0.1", 0), hud._Poignee)
+        threading.Thread(target=serveur.serve_forever, daemon=True).start()
+        try:
+            connexion = http.client.HTTPConnection("127.0.0.1", serveur.server_address[1], timeout=5)
+            connexion.request("GET", "/")
+            page = connexion.getresponse().read().decode("utf-8")
+            connexion.close()
+        finally:
+            serveur.shutdown()
+            serveur.server_close()
+        version = hud._version_page()
+        self.assertRegex(version, r"^[0-9a-f]{12}$")
+        self.assertIn(f'<meta name="jarvis-version" content="{version}">', page)
+        self.assertNotIn("__VERSION_PAGE__", page)
 
 
 TUILES_FACTICES = [
@@ -443,7 +490,7 @@ class HudPageBasculeTests(unittest.TestCase):
 
     def test_reacteur_grand_des_qu_elle_parle_puis_tableau_au_repos(self):
         self._attendre_mode(True)
-        self.assertEqual(self.page.locator(".tuile").count(), 2)
+        self.assertEqual(self.page.locator("#tbSuivi .tb-etat").count(), 1)
         for etat in ("ecoute", "reflexion", "parole"):
             hud.etat(etat)
             self._attendre_mode(False, delai=2000)
@@ -492,8 +539,44 @@ class HudPageBasculeTests(unittest.TestCase):
     def test_tuiles_rendues_comme_du_texte(self):
         self._attendre_mode(True)
         self.assertEqual(self.page.locator("#tableau img").count(), 0)
-        self.assertIn("<img", self.page.locator(".tuile li .texte").first.inner_text())
-        self.assertIn("Indisponible", self.page.locator(".tuile.indisponible").inner_text())
+        self.assertIn("<img", self.page.locator("#tbTitre").inner_text())
+        self.assertIn("Indisponible", self.page.locator("#tbSuivi .tb-etat").inner_text())
+
+    def _echeances(self):
+        demain = (dt.datetime.now().astimezone() + dt.timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        return [{"debut": (demain + dt.timedelta(days=k)).isoformat(), "marque": f"Marque {c}",
+                 "tache": "Publication"} for k, c in enumerate("ABC")]
+
+    def test_donnees_structurees_en_vedette_affiches_et_cartes(self):
+        self._attendre_mode(True)
+        hud.tableau([
+            {"id": "loopstr", "titre": "Loopstr", "etat": "ok", "donnees": {"echeances": self._echeances()}},
+            {"id": "instagram", "titre": "Instagram", "etat": "ok", "donnees": {"comptes": [
+                {"compte": "compte.demo", "abonnes": 1036121, "delta": 2308, "depuis": "hier",
+                 "serie": [1000000, 1020000, 1036121]}]}},
+        ])
+        # Les echeances datees passent avant le resume sans date de l'agenda.
+        self.page.wait_for_function(
+            "document.getElementById('tbTitre').textContent === 'Publication Marque A'", timeout=4000)
+        self.assertEqual(self.page.locator("#tbAvenir .tb-affiche").count(), 3)   # B, C, agenda
+        self.page.wait_for_function(
+            "(document.querySelector('#tbSuivi .tb-insta .tb-grand') || {}).textContent"
+            "?.replace(/\\s/g, ' ') === '1,04 M'", timeout=4000)
+        self.assertIn("+2", self.page.locator("#tbSuivi .tb-insta .tb-delta").inner_text())
+        self.assertEqual(self.page.locator("#tbSuivi .tb-insta .tb-courbe").count(), 1)
+
+    def test_vue_detaillee_au_clic_et_echap(self):
+        self._attendre_mode(True)
+        hud.tableau([{"id": "loopstr", "titre": "Loopstr", "etat": "ok",
+                      "donnees": {"echeances": self._echeances()}}])
+        affiche = self.page.locator("#tbAvenir .tb-affiche").first
+        affiche.wait_for(timeout=4000)
+        affiche.click()
+        self.page.locator(".tb-detail").wait_for(timeout=3000)
+        self.assertGreaterEqual(self.page.locator(".tb-detail .ligne-d").count(), 3)
+        self.page.keyboard.press("Escape")
+        self.page.locator(".tb-detail").wait_for(state="detached", timeout=3000)
 
 
 if __name__ == "__main__":

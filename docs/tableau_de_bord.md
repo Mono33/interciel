@@ -1,9 +1,32 @@
 # Tableau de bord dans la fenêtre Jarvis (HUD)
 
-Au repos, la fenêtre Jarvis devient un petit écran d'information façon Echo Show :
-le réacteur se range dans le coin en haut à gauche et des **tuiles** occupent le
-reste de la fenêtre (agenda, factures, Loopstr, réseaux…). Dès que tu parles à
-Jarvis, le réacteur revient en grand ; le tableau revient quand il a fini.
+Au repos, la fenêtre Jarvis devient un écran d'information façon Netflix : le
+réacteur se range dans le coin en haut à gauche, une grande **bannière** met en
+scène ce qui arrive, puis deux **rangées de cartes** montrent le reste (Loopstr,
+agenda, réseaux, factures…). Dès que tu parles à Jarvis, le réacteur revient en
+grand ; le tableau revient quand il a fini.
+
+## Présentation (direction « Cinéma »)
+
+- **Bannière** : la prochaine échéance Loopstr ou le prochain rendez-vous, en très
+  grand, avec son jour, le délai (« dans 2 h ») et les deux suivants. Le fond prend
+  la couleur de la source et affiche les initiales de la marque. Sans rien à venir,
+  elle dit « Rien à l'horizon » et pourquoi (sources muettes ou non reliées).
+- **Coup d'œil** (dans la bannière) : météo, titre Spotify en cours, colis en route,
+  si ces sources sont actives.
+- **À venir** : une affiche par échéance ou rendez-vous suivant ; leur nombre
+  s'adapte à la largeur, le surplus est regroupé dans une carte « +N ».
+- **Réseaux et suivi** : une carte par compte Instagram (abonnés en format court,
+  écart depuis le dernier relevé, petite courbe), Discord (mentions, salons les plus
+  actifs, serveur nommé une seule fois), factures. Les sources absentes ou en panne
+  sont regroupées dans une seule carte « Sources ».
+- **Souris** : une carte survolée grossit et s'éclaire, les autres s'estompent ; une
+  affiche révèle son délai. Un clic ouvre une vue détaillée animée (Échap ou clic à
+  côté pour fermer). Tout est en lecture seule.
+- **Écrans** : pensé pour 1920×1080 ; au-delà de 2200×1200 tout grandit d'un quart ;
+  en portrait (écran vertical), les cartes passent sur deux colonnes.
+- **Mises à jour** : les cartes sont mises à jour en place, les chiffres s'animent.
+  Quand `hud.html` change sur le disque, la fenêtre ouverte se recharge d'elle-même.
 
 Tout se passe dans la **même fenêtre** que le réacteur (`hud.html`, servie sur
 `http://127.0.0.1:8770`). Le cockpit (`/cockpit`) reste une page à part.
@@ -57,6 +80,18 @@ autres tuiles. Elle est retentée au bout de 5 minutes.
 
 Pour voir le rendu sans aucune donnée réelle : `uv run python hud.py` joue un
 scénario de démonstration avec des tuiles factices.
+
+### Forme d'une tuile
+
+Chaque source produit une tuile `{id, titre, etat, maj, valeur, legende, lignes,
+message}` (résumé lisible par n'importe quelle fenêtre) et, si elle en a, un champ
+facultatif `donnees` que la nouvelle présentation exploite : `echeances` (Loopstr :
+date, marque, tâche), `evenements` (agenda), `comptes` (Instagram : abonnés, écart,
+série de relevés), `serveurs` (Discord : salons regroupés par serveur), montants
+des factures, météo, colis, titre Spotify. Les émojis décoratifs des noms
+(« 🚀 Marque — Publication », « 💬・général ») sont retirés côté serveur. Une
+fenêtre récente sait aussi afficher les tuiles d'un serveur plus ancien, sans
+`donnees`.
 
 ## Sécurité et confidentialité
 
