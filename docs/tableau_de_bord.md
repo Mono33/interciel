@@ -10,8 +10,10 @@ grand ; le tableau revient quand il a fini.
 
 - **Bannière** : la prochaine échéance Loopstr ou le prochain rendez-vous, en très
   grand, avec son jour, le délai (« dans 2 h ») et les deux suivants. Le fond prend
-  la couleur de la source et affiche les initiales de la marque. Sans rien à venir,
-  elle dit « Rien à l'horizon » et pourquoi (sources muettes ou non reliées).
+  la couleur de la source. Sans rien à venir, elle dit « Rien à l'horizon » et
+  pourquoi (sources muettes ou non reliées).
+- **Jarvis en fond** : le réacteur ne disparaît pas, il recule derrière la bannière,
+  en grand et en transparence ; dès que tu parles, il revient au centre, net.
 - **Coup d'œil** (dans la bannière) : météo, titre Spotify en cours, colis en route,
   si ces sources sont actives.
 - **À venir** : une affiche par échéance ou rendez-vous suivant ; leur nombre
@@ -24,9 +26,12 @@ grand ; le tableau revient quand il a fini.
   affiche révèle son délai. Un clic ouvre une vue détaillée animée (Échap ou clic à
   côté pour fermer). Tout est en lecture seule.
 - **Écrans** : pensé pour 1920×1080 ; au-delà de 2200×1200 tout grandit d'un quart ;
-  en portrait (écran vertical), les cartes passent sur deux colonnes.
+  en portrait (écran vertical), les cartes passent sur deux colonnes ; dans une
+  fenêtre étroite (moins de 700 px), boutons en icônes, une carte par ligne et
+  défilement vertical.
 - **Mises à jour** : les cartes sont mises à jour en place, les chiffres s'animent.
-  Quand `hud.html` change sur le disque, la fenêtre ouverte se recharge d'elle-même.
+  Quand `hud.html` change sur le disque, la fenêtre ouverte se recharge d'elle-même
+  dans les 15 secondes, sans redémarrer Jarvis.
 
 Tout se passe dans la **même fenêtre** que le réacteur (`hud.html`, servie sur
 `http://127.0.0.1:8770`). Le cockpit (`/cockpit`) reste une page à part.

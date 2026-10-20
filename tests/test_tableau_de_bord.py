@@ -416,6 +416,34 @@ class HudTableauTests(unittest.TestCase):
             {"id": "agenda", "titre": "Agenda", "etat": "ok"}]})
         self.assertEqual(evenements[0], {"t": "version", "v": hud._version_page()})
 
+    def test_une_page_modifiee_est_annoncee_au_battement(self):
+        versions = iter(["aaaaaaaaaaaa", "bbbbbbbbbbbb"])
+        actuelle = {"v": next(versions)}
+        serveur = hud._Serveur(("127.0.0.1", 0), hud._Poignee)
+        threading.Thread(target=serveur.serve_forever, daemon=True).start()
+        try:
+            with patch.object(hud, "_BATTEMENT", 0.2), \
+                    patch.object(hud, "_version_page", lambda contenu=None: actuelle["v"]):
+                connexion = http.client.HTTPConnection("127.0.0.1", serveur.server_address[1],
+                                                       timeout=5)
+                connexion.request("GET", "/flux")
+                reponse = connexion.getresponse()
+                for _ in range(400):                    # premier battement : boucle en cours
+                    if reponse.fp.readline().startswith(b": battement"):
+                        break
+                actuelle["v"] = next(versions)          # hud.html change sur le disque
+                annonces = []
+                for _ in range(400):
+                    ligne = reponse.fp.readline().decode("utf-8").strip()
+                    if ligne.startswith("data: ") and json.loads(ligne[6:]).get("t") == "version":
+                        annonces.append(json.loads(ligne[6:])["v"])
+                        break
+                connexion.close()
+        finally:
+            serveur.shutdown()
+            serveur.server_close()
+        self.assertEqual(annonces[-1], "bbbbbbbbbbbb")
+
     def test_la_page_porte_la_version_annoncee_par_le_flux(self):
         serveur = hud._Serveur(("127.0.0.1", 0), hud._Poignee)
         threading.Thread(target=serveur.serve_forever, daemon=True).start()

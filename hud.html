@@ -283,25 +283,26 @@
 
   /* ================================================================ tableau de bord
      Direction « Cinema » : au repos, une banniere met en scene ce qui arrive, puis
-     deux rangees de cartes. Le reacteur se range dans le coin de la banniere. */
+     deux rangees de cartes. Jarvis reste la, en grand et en transparence, derriere
+     la banniere. Plans : fond colore (z 3) < reacteur (z 4) < tableau (z 5). */
+  :root { --tb-accent: #ff8a3d; --tb-accent-2: #e1306c; }
   body.mode-tableau #reacteur {
-    z-index: 6;
-    top: calc(clamp(28px, 3.6vh, 40px) + 19px); left: calc(var(--tb-marge) + 29px);
-    width: 58px; height: 58px;
+    z-index: 4; opacity: .8; mix-blend-mode: screen;   /* il eclaire le fond sans le couvrir */
+    top: 31vh; left: 74vw;
+    width: min(44vh, 32vw); height: min(44vh, 32vw);
   }
-  #reacteur { transition: top .55s var(--ease-tb), left .55s var(--ease-tb),
-                          width .55s var(--ease-tb), height .55s var(--ease-tb); }
+  #reacteur { transition: top .7s var(--ease-tb), left .7s var(--ease-tb),
+                          width .7s var(--ease-tb), height .7s var(--ease-tb),
+                          opacity .7s var(--ease-tb); }
   body.mode-tableau .etiquette-etat, body.mode-tableau .releve,
   body.mode-tableau .transcription, body.mode-tableau .horloge,
   body.mode-tableau .coin { opacity: 0; pointer-events: none; }
   .releve, .horloge, .coin { transition: opacity .4s ease; }
 
   .tableau {
-    --tb-accent: #ff8a3d;
-    --tb-accent-2: #e1306c;
     position: fixed; inset: 0; z-index: 5;
     display: grid; grid-template-rows: minmax(0, 1fr) auto auto;
-    background: #000; color: #fff;
+    background: transparent; color: #fff;
     font-family: var(--sans); font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
     opacity: 0; visibility: hidden; pointer-events: none;
@@ -320,23 +321,22 @@
     display: flex; flex-direction: column; justify-content: flex-end;
     padding: 110px var(--tb-marge) clamp(20px, 3vh, 38px);
   }
+  /* fond colore de la banniere, sous le reacteur (hors du tableau pour cela) */
   .tb-art {
-    position: absolute; inset: -4%;
+    position: fixed; inset: -4%; z-index: 3; pointer-events: none;
+    opacity: 0; visibility: hidden;
     background:
-      radial-gradient(52% 78% at 72% 36%, color-mix(in srgb, var(--tb-accent) 72%, transparent), transparent 64%),
-      radial-gradient(42% 64% at 98% 92%, color-mix(in srgb, var(--tb-accent-2) 62%, transparent), transparent 64%),
-      radial-gradient(48% 70% at 52% -10%, rgba(129,52,175,.62), transparent 68%),
-      radial-gradient(30% 50% at 30% 110%, color-mix(in srgb, var(--tb-accent-2) 28%, transparent), transparent 70%),
+      linear-gradient(0deg, #000 0%, #000 44%, transparent 62%),
+      radial-gradient(48% 44% at 72% 22%, color-mix(in srgb, var(--tb-accent) 72%, transparent), transparent 64%),
+      radial-gradient(38% 36% at 98% 50%, color-mix(in srgb, var(--tb-accent-2) 62%, transparent), transparent 64%),
+      radial-gradient(44% 40% at 52% -6%, rgba(129,52,175,.62), transparent 68%),
+      radial-gradient(28% 30% at 30% 62%, color-mix(in srgb, var(--tb-accent-2) 26%, transparent), transparent 70%),
       #0b0607;
-    transition: background 1.2s ease;
+    transition: opacity .45s var(--ease-tb), visibility 0s linear .45s, background 1.2s ease;
     animation: tb-derive 26s ease-in-out infinite alternate;
   }
-  .tb-sigle {
-    position: absolute; right: 5%; top: 50%; transform: translateY(-48%);
-    font-size: min(38vh, 24vw); font-weight: 800; letter-spacing: -.06em; line-height: 1;
-    color: transparent; -webkit-text-stroke: 2px rgba(255,255,255,.14);
-    white-space: nowrap; user-select: none; pointer-events: none;
-  }
+  body.mode-tableau .tb-art { opacity: 1; visibility: visible;
+    transition: opacity .45s var(--ease-tb), background 1.2s ease; }
   .tb-voile {
     position: absolute; inset: 0; pointer-events: none;
     background:
@@ -346,7 +346,7 @@
   }
   .tb-moi {
     position: absolute; z-index: 2;
-    top: clamp(28px, 3.6vh, 40px); left: calc(var(--tb-marge) + 74px);
+    top: clamp(28px, 3.6vh, 40px); left: var(--tb-marge);
     height: 38px; display: flex; flex-direction: column; justify-content: center;
   }
   .tb-moi b { font-size: 22px; font-weight: 650; letter-spacing: -.01em; line-height: 1.15; }
@@ -388,8 +388,9 @@
   .tb-puce span { font-size: 13px; color: var(--tb-texte-2); }
 
   /* ---- rangees */
-  .tb-rangee { min-width: 0; padding: 0 var(--tb-marge); margin-top: clamp(8px, 1.4vh, 16px); }
-  .tb-rangee:last-child { margin-bottom: clamp(18px, 2.8vh, 34px); }
+  /* fond noir plein sous les rangees : raccord net avec le bas de la banniere */
+  .tb-rangee { min-width: 0; padding: clamp(8px, 1.4vh, 16px) var(--tb-marge) 0; background: #000; }
+  .tb-rangee:last-child { padding-bottom: clamp(18px, 2.8vh, 34px); }
   .tb-rangee[hidden] { display: none; }
   .tb-rangee h2 { margin-bottom: 12px; font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
   .tb-rangee h2 span { margin-left: 8px; font-size: 15px; font-weight: 400; color: var(--tb-texte-3); }
@@ -518,16 +519,11 @@
   @media (min-width: 2200px) and (min-height: 1200px) {
     .tableau, .tb-detail { zoom: 1.25; }
     body.mode-tableau .barre-boutons { zoom: 1.25; }
-    body.mode-tableau #reacteur {
-      width: 72px; height: 72px;
-      top: calc((clamp(28px, 3.6vh, 40px) + 19px) * 1.25);
-      left: calc((var(--tb-marge) + 29px) * 1.25);
-    }
   }
 
   @media (orientation: portrait) {
     .tb-vedette { max-width: 100%; }
-    .tb-sigle { top: 36%; font-size: 40vw; }
+    body.mode-tableau #reacteur { top: 24vh; left: 50vw; width: min(72vw, 40vh); height: min(72vw, 40vh); }
     .tb-coup-oeil { position: relative; right: auto; bottom: auto; width: auto; z-index: 1;
       margin-top: 22px; flex-direction: row; flex-wrap: wrap; }
     .tb-coup-oeil .tb-puce { flex: 1 1 calc(50% - 5px); }
@@ -544,11 +540,22 @@
   @media (max-width: 700px) {
     .barre-boutons { right: 28px; top: 104px; }
     .controle-tiroir { top: 88px; right: 12px; bottom: 12px; width: calc(100vw - 24px); }
+    /* fenetre etroite : boutons en icones, une carte par ligne, defilement permis */
+    .controle-bouton .libelle { display: none; }
+    .controle-bouton { padding: 0 11px; }
+    body.mode-tableau .tb-heure { display: none; }
+    .tableau { grid-template-rows: auto auto auto; overflow-y: auto; }
+    .tb-banniere { min-height: 56vh; padding-top: 96px; }
+    .tb-titre { font-size: clamp(32px, 9vw, 46px); }
+    .tb-titre.long { font-size: clamp(28px, 7.4vw, 38px); }
+    .tb-suivi > .tb-carte { flex: 1 1 100%; }
+    body.mode-tableau #reacteur { top: 30vh; width: 80vw; height: 80vw; }
   }
 </style>
 </head>
 <body>
   <div id="scene"></div>
+  <div class="tb-art" aria-hidden="true"></div>
   <canvas id="reacteur"></canvas>
 
   <div class="etiquette-etat" id="etiquetteEtat">VEILLE</div>
@@ -590,8 +597,6 @@
 
   <section class="tableau" id="tableau" aria-label="Tableau de bord" aria-hidden="true">
     <div class="tb-banniere">
-      <div class="tb-art"></div>
-      <div class="tb-sigle" id="tbSigle" aria-hidden="true"></div>
       <div class="tb-voile"></div>
       <div class="tb-moi"><b id="tbSalut"></b><span id="tbDate"></span></div>
       <div class="tb-vedette" id="tbVedette">
@@ -617,7 +622,7 @@
     <button class="controle-bouton" id="basculerTableau" type="button" hidden
       aria-controls="tableau" aria-pressed="false"
       title="Afficher ou masquer le tableau de bord"><span class="tb-icone" data-icone="tableau"></span><span class="libelle">Tableau de bord</span></button>
-    <button class="controle-bouton" id="ouvrirControle" type="button"
+    <button class="controle-bouton" id="ouvrirControle" type="button" title="Commandes rapides"
       aria-controls="controleTiroir" aria-expanded="false"><span class="tb-icone" data-icone="reglages"></span><span class="libelle">Config</span></button>
   </div>
   <aside class="controle-tiroir" id="controleTiroir" aria-hidden="true">
@@ -1102,20 +1107,14 @@ function elementsAvenir(parId) {
     .map((x) => x[0]);
 }
 
-function sigle(nom) {
-  const mots = texte(nom).replace(/[^\p{L}\p{N}\s]/gu, " ").trim().split(/\s+/).filter(Boolean);
-  if (!mots.length) return "J";
-  return (mots.length > 1 ? mots[0][0] + mots[1][0] : mots[0].slice(0, 2)).toUpperCase();
-}
-
 function libelleItem(it) { return it.tache ? `${it.tache} ${it.marque}` : it.marque; }
 
 function rendreVedette(items, parId) {
   const hero = items[0];
   const [accent, accent2] = ACCENTS[hero ? hero.source : "jarvis"];
-  const tableau = $("tableau");
-  tableau.style.setProperty("--tb-accent", accent);
-  tableau.style.setProperty("--tb-accent-2", accent2 || accent);
+  // Sur la racine : le fond colore (hors du tableau) en suit la couleur.
+  document.documentElement.style.setProperty("--tb-accent", accent);
+  document.documentElement.style.setProperty("--tb-accent-2", accent2 || accent);
   const sur = $("tbSur"), meta = $("tbMeta"), ensuite = $("tbEnsuite"), titre = $("tbTitre");
   sur.replaceChildren();
   meta.replaceChildren();
@@ -1125,7 +1124,6 @@ function rendreVedette(items, parId) {
     const q = quand(hero);
     sur.append(icone(hero.source), document.createTextNode(hero.source === "agenda" ? "Agenda · à venir" : "Loopstr · à venir"));
     t = libelleItem(hero);
-    $("tbSigle").textContent = sigle(hero.marque);
     meta.append(elt("span", "tb-etiquette", q.etiquette || "Bientôt"));
     const infos = [];
     if (q.heure) infos.push(q.heure);
@@ -1148,7 +1146,6 @@ function rendreVedette(items, parId) {
     // Rien d'annonce : la banniere reste calme et dit pourquoi.
     sur.append(icone("tableau"), document.createTextNode("Jarvis"));
     t = "Rien à l'horizon";
-    $("tbSigle").textContent = "J";
     const sources = [parId.loopstr, parId.agenda].filter(Boolean);
     const lisible = sources.some((x) => x.etat === "ok" || x.etat === "vide");
     const enPanne = sources.some((x) => x.etat === "indisponible");
@@ -1236,7 +1233,9 @@ function cartesAvenir(items) {
   $("tbRangeeAvenir").hidden = false;                // mesurable
   const largeur = rail.clientWidth || (innerWidth - 120);
   const place = Math.max(1, Math.floor((largeur + 14) / (250 + 14)));
-  const visibles = reste.length > place ? reste.slice(0, place - 1) : reste;
+  // La carte « +N » n'a de sens que s'il reste de la place pour de vraies affiches.
+  const avecAutres = reste.length > place && place >= 3;
+  const visibles = reste.slice(0, avecAutres ? place - 1 : place);
   // Peu d'affiches : elles se partagent toute la largeur (jamais de grand vide).
   const colonnes = Math.max(1, Math.min(place, reste.length));
   rail.style.setProperty("--tb-place", `calc((100% - ${(colonnes - 1) * 14}px) / ${colonnes})`);
@@ -1256,7 +1255,7 @@ function cartesAvenir(items) {
       ouvrir: (carte) => detailAvenir(carte, items),
     };
   });
-  if (reste.length > visibles.length) {
+  if (avecAutres) {
     const n = reste.length - visibles.length;
     cartes.push({
       cle: "avenir:autres", classe: "tb-affiche tb-autres", accent: ACCENTS.loopstr[0],

@@ -43,6 +43,8 @@ _FICHIER_HTML = Path(__file__).parent / "hud.html"
 TITRE_FENETRE = "JARVIS · Reacteur arc"
 # Une fenetre fermee n'est rouverte qu'une fois par minute au plus.
 _DELAI_REOUVERTURE = 60.0
+# Secondes entre deux battements du flux (et verifications de version de la page).
+_BATTEMENT = 15
 _MODE_FENETRE = "navigateur"
 _DERNIERE_OUVERTURE = 0.0
 # Ecran ou ouvrir la fenetre : numero (meme numerotation que l'overlay) ou position
@@ -504,12 +506,19 @@ class _Poignee(BaseHTTPRequestHandler):
                 self._pousser(evenement)
 
             # Flux continu. Le timeout sert a envoyer un battement de coeur
-            # qui garde la connexion (et detecte les clients partis).
+            # qui garde la connexion (et detecte les clients partis). A chaque
+            # battement, une page modifiee sur le disque est annoncee : la
+            # fenetre ouverte se recharge sans redemarrage de Jarvis.
+            version = _version_page()
             while True:
                 try:
-                    donnees = fil.get(timeout=15)
+                    donnees = fil.get(timeout=_BATTEMENT)
                     self._ecrire(donnees)
                 except queue.Empty:
+                    actuelle = _version_page()
+                    if actuelle and actuelle != version:
+                        version = actuelle
+                        self._pousser({"t": "version", "v": version})
                     self.wfile.write(b": battement\n\n")
                     self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
