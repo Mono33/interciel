@@ -92,6 +92,8 @@ def contexte_serveur(certificat, cle):
     contexte = classe_ssl()(ssl.PROTOCOL_TLS_SERVER)
     if contexte.minimum_version < ssl.TLSVersion.TLSv1_2:
         raise ssl.SSLError("TLS 1.2 minimum indisponible")
+    if contexte.verify_mode != ssl.CERT_NONE:      # les postes n'ont pas de certificat
+        raise ssl.SSLError("le listener LAN ne doit pas exiger de certificat client")
     contexte.load_cert_chain(str(certificat), str(cle))
     return contexte
 

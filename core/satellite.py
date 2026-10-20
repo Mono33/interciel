@@ -114,6 +114,10 @@ def _tableau_autorise(ws, choix) -> bool:
     vu ici est donc bien celui de la connexion reelle."""
     if not choix:
         return False
+    entetes = getattr(ws, "headers", {}) or {}
+    if any(entetes.get(nom) for nom in ("forwarded", "x-forwarded-for", "x-forwarded-host",
+                                        "x-forwarded-proto", "x-real-ip")):
+        return False      # proxy (ngrok) : son « wss » n'est pas celui de la connexion
     if str((getattr(ws, "scope", None) or {}).get("scheme", "")) == "wss":
         return True
     client = getattr(ws, "client", None)
@@ -789,6 +793,9 @@ def monter_routes(app):
                     if accepte:
                         sess.nouveau_reveil(reglage(
                             "satellite_lan.max_relances", 2))
+                        # Conversation ouverte : plus de tuiles avant le retour en veille
+                        # (le poste passe lui-meme en ecoute, sans message « etat »).
+                        sess.etat = "ecoute"
                     accuse_vocal = False
                     if accepte and bool(reglage(
                             "satellite_lan.accuse_reveil_vocal", True)):

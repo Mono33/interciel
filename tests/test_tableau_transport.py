@@ -30,8 +30,9 @@ def _charger(nom, chemin):
     return module
 
 
-def _ws(hote, schema="ws"):
-    return SimpleNamespace(scope={"scheme": schema}, client=SimpleNamespace(host=hote))
+def _ws(hote, schema="ws", entetes=None):
+    return SimpleNamespace(scope={"scheme": schema}, client=SimpleNamespace(host=hote),
+                           headers=entetes or {})
 
 
 class AutorisationTests(unittest.TestCase):
@@ -49,6 +50,9 @@ class AutorisationTests(unittest.TestCase):
         self.assertFalse(serveur._tableau_autorise(_ws("100.90.80.70", "ws"), ["agenda"]))
         self.assertTrue(serveur._tableau_autorise(_ws("127.0.0.1", "ws"), True))
         self.assertFalse(serveur._tableau_autorise(_ws("127.0.0.1", "wss"), False))
+        # Tunnel ngrok : uvicorn reecrit le schema en wss d'apres X-Forwarded-Proto.
+        self.assertFalse(serveur._tableau_autorise(
+            _ws("127.0.0.1", "wss", {"x-forwarded-proto": "https"}), True))
 
     def test_filtrer(self):
         self.assertEqual(tdb.filtrer(TUILES, True), TUILES)
@@ -146,6 +150,20 @@ class SessionServeurTests(unittest.TestCase):
             abonne(self.tuiles)                                  # depuis la boucle de fond
             pousse = json.loads(ws.receive_text())
         self.assertEqual(pousse["tuiles"][0]["valeur"], "3")
+
+    def test_rien_pendant_une_conversation(self):
+        connexion, demarrer = self._session("wss://testserver/satellite")
+        reglages = {"satellite_lan.accuse_reveil_vocal": False}
+        with patch.object(serveur, "reglage", lambda cle, defaut=None: reglages.get(cle, defaut)), \
+                patch("core.arbitrage_micro.reserver_reveil", return_value=True), connexion as ws:
+            self._bonjour(ws)
+            ws.receive_text()                                    # tuiles initiales
+            ws.send_text(json.dumps({"type": "reveil", "score": 1.0, "id": "r1"}))
+            self.assertEqual(json.loads(ws.receive_text())["type"], "reveil_accepte")
+            demarrer.call_args.args[0](TUILES)                  # une tuile change
+            ws.send_text(json.dumps({"type": "ping"}))
+            suivant = json.loads(ws.receive_text())
+        self.assertEqual(suivant["type"], "pong")                # rien ne s'est intercale
 
     def test_rien_sur_une_connexion_en_clair(self):
         connexion, demarrer = self._session("ws://testserver/satellite")
